@@ -114,3 +114,4 @@ prototyping/
 .Rproj.user
 .idea/
 data/
+*.pkl
