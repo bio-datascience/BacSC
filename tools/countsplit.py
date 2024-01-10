@@ -1,25 +1,13 @@
 import numpy as np
 import anndata as ad
 import scanpy as sc
+import scipy.sparse as sps
 
 import tools.util as ut
 
 
-def countsplit_adata(adata, data_dist="NB", beta_key="nb_overbisp", epsilon=0.5, min_cells=1, min_genes=1, max_counts=1e9,
+def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb_mean", epsilon=0.5, min_cells=1, min_genes=1, max_counts=100000, min_counts=1,
                         layer=None, seed=None):
-    """
-    TODO: Filtering for countsplit data
-
-    :param adata:
-    :param data_dist:
-    :param beta_key:
-    :param epsilon:
-    :param min_cells:
-    :param min_genes:
-    :param max_counts:
-    :param layer:
-    :return:
-    """
 
     count_data = ut.convert_to_dense_counts(adata, layer)
 
@@ -43,13 +31,14 @@ def countsplit_adata(adata, data_dist="NB", beta_key="nb_overbisp", epsilon=0.5,
         raise NotImplementedError("Only 'NB' and 'Poi' are implemented for 'data_dist'")
 
     # Make anndata object for training data and filter
-    adata_train = ad.AnnData(X=X_train, obs=adata.obs.copy(), var=adata.var.copy())
-    sc.pp.filter_cells(adata_train, min_genes=min_genes)
-    sc.pp.filter_cells(adata_train, max_counts=max_counts)
+    adata_train = ad.AnnData(X=sps.csr_matrix(X_train), obs=adata.obs.copy(), var=adata.var.copy())
     sc.pp.filter_genes(adata_train, min_cells=min_cells)
+    sc.pp.filter_cells(adata_train, min_genes=min_genes)
+    sc.pp.filter_cells(adata_train, min_counts=min_counts)
+    sc.pp.filter_cells(adata_train, max_counts=max_counts)
 
     # filter test data to include same cells/features as training data
-    adata_test = ad.AnnData(X=np.array(X_test), obs=adata.obs.copy(), var=adata.var.copy())
+    adata_test = ad.AnnData(X=sps.csr_matrix(np.array(X_test)), obs=adata.obs.copy(), var=adata.var.copy())
     sc.pp.filter_cells(adata_test, min_genes=1)
     sc.pp.filter_genes(adata_test, min_cells=1)
 
@@ -66,10 +55,10 @@ def countsplit_adata(adata, data_dist="NB", beta_key="nb_overbisp", epsilon=0.5,
     adata_test.layers["counts"] = adata_test.X.copy()
 
     if data_dist == "NB":
-        adata_train.var["nb_mean"] = adata_train.var["nb_mean"] * epsilon
-        adata_train.var["nb_overdisp"] = adata_train.var["nb_overdisp"] * epsilon
-        adata_test.var["nb_mean"] = adata_test.var["nb_mean"] * (1 - epsilon)
-        adata_test.var["nb_overdisp"] = adata_test.var["nb_overdisp"] * (1 - epsilon)
+        adata_train.var["nb_mean"] = adata_train.var[mean_key] * epsilon
+        adata_train.var["nb_overdisp"] = adata_train.var[beta_key] * epsilon
+        adata_test.var["nb_mean"] = adata_test.var[mean_key] * (1 - epsilon)
+        adata_test.var["nb_overdisp"] = adata_test.var[beta_key] * (1 - epsilon)
 
     return adata_train, adata_test
 
@@ -83,8 +72,11 @@ def select_n_pcs_countsplit(train_data, test_data, max_k=20):
         ret = u_ @ np.diag(s_) @ v_
         return ret
 
-    u_train, s_train, v_train = np.linalg.svd(train_data.X, full_matrices=False)
-    k_devs = [np.linalg.norm((test_data.X - approx_k(u_train, s_train, v_train, k + 1)), ord='fro') ** 2 for k in
+    X_train = ut.convert_to_dense_counts(train_data)
+    X_test = ut.convert_to_dense_counts(test_data)
+
+    u_train, s_train, v_train = np.linalg.svd(X_train, full_matrices=False)
+    k_devs = [np.linalg.norm((X_test - approx_k(u_train, s_train, v_train, k+1)), ord='fro') ** 2 for k in
               range(max_k)]
 
     opt_k = np.where(k_devs == np.min(k_devs))[0][0] + 1

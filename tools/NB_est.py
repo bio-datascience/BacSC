@@ -3,6 +3,7 @@ from scipy.special import gammaln, factorial
 from scipy.optimize import fmin_l_bfgs_b as optim
 
 import tools.util as ut
+import tools.scTransform as sct
 
 
 def fit_nbinom(X, initial_params=None):
@@ -59,28 +60,48 @@ def negbin_numpy_to_mean(r, p):
     return mu, b
 
 
-def estimate_overdisp_nb(adata, layer=None, cutoff=0.01):
+def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
 
-    count_data = ut.convert_to_dense_counts(adata, layer)
-    n, p = count_data.shape
+    if flavor == "BFGS":
+        count_data = ut.convert_to_dense_counts(adata, layer)
+        n, p = count_data.shape
 
-    overdisps = []
-    means = []
+        overdisps = []
+        means = []
 
-    c = 0
-    for i in range(p):
-        c += 1
-        if c % 100 == 0:
-            print(f"Fitting feature {c}/{p}")
-        res_ = fit_nbinom(count_data[:, i])
-        mu_, b_ = negbin_numpy_to_mean(res_["size"], res_["prob"])
+        c = 0
+        for i in range(p):
+            c += 1
+            if c % 100 == 0:
+                print(f"Fitting feature {c}/{p}")
+            res_ = fit_nbinom(count_data[:, i])
+            mu_, b_ = negbin_numpy_to_mean(res_["size"], res_["prob"])
 
-        means.append(mu_)
-        overdisps.append(b_)
+            means.append(mu_)
+            overdisps.append(b_)
 
-    adata.var["nb_mean"] = means
-    adata.var["nb_overdisp"] = overdisps
+        adata.var["nb_mean"] = means
+        adata.var["nb_overdisp"] = overdisps
 
-    adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
-    adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff
-    adata.var["nb_overdisp_cutoff"][(adata.var["nb_overdisp"] > 0.1 * adata.var["total_counts"])] = cutoff
+        adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
+        adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff
+        adata.var["nb_overdisp_cutoff"][(adata.var["nb_overdisp"] > 0.1 * adata.var["total_counts"])] = cutoff
+
+    elif flavor == "sctransform":
+        adata_sct = sct.SCTransform(adata,
+                                    min_cells=1,
+                                    gmean_eps=1,
+                                    n_genes=2000,
+                                    n_cells=None,  # use all cells
+                                    bin_size=500,
+                                    bw_adjust=3,
+                                    inplace=False)
+        adata.var["nb_overdisp"] = adata_sct.var["theta_sct"]
+        adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
+        adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff
+        adata.var["nb_overdisp_cutoff"][np.isnan(adata.var["nb_overdisp_cutoff"])] = cutoff
+        adata.var["nb_mean"] = adata_sct.var["Intercept_sct"]
+
+
+
+
