@@ -8,16 +8,12 @@ import os
 from scipy.spatial.distance import pdist, squareform
 
 
-def scDEED(adata, rng_seed=None, n_pcs=3, n_neighbors=20, embedding_method="UMAP", min_dist=0.1, perplexity=30,
+def scDEED(adata, data_perm=None, rng_seed=None, n_pcs=3, n_neighbors=20, embedding_method="UMAP", min_dist=0.1,
+           perplexity=30,
            similarity_percent=0.5):
-    rng = np.random.default_rng(rng_seed)
 
-    data_perm = adata.copy()
-
-    if type(data_perm.X) == scipy.sparse._csr.csr_matrix:
-        data_perm.X = data_perm.X.todense()
-
-    data_perm.X = scipy.sparse._csr.csr_matrix(rng.permuted(data_perm.X, axis=0))
+    if data_perm is None:
+        data_perm = create_permuted_data_scdeed(adata, rng_seed)
 
     adata = embed_data_scDEED(adata, n_pcs, n_neighbors, embedding_method, min_dist, perplexity)
     data_perm = embed_data_scDEED(data_perm, n_pcs, n_neighbors, embedding_method, min_dist, perplexity)
@@ -37,9 +33,24 @@ def scDEED(adata, rng_seed=None, n_pcs=3, n_neighbors=20, embedding_method="UMAP
     return adata
 
 
+def create_permuted_data_scdeed(adata, rng_seed=None):
+    rng = np.random.default_rng(rng_seed)
+
+    data_perm = adata.copy()
+
+    if type(data_perm.X) == scipy.sparse._csr.csr_matrix:
+        data_perm.X = data_perm.X.todense()
+
+    data_perm = ad.AnnData(X=scipy.sparse._csr.csr_matrix(rng.permuted(adata.X.copy(), axis=0)))
+
+    return data_perm
+
+
 def embed_data_scDEED(adata, n_pcs=3, n_neighbors=20, embedding_method="UMAP", min_dist=0.1, perplexity=30):
-    sc.pp.scale(adata, max_value=10)
-    sc.pp.pca(adata, svd_solver='arpack')
+
+    if "X_pca" not in adata.obsm_keys():
+        sc.pp.scale(adata, max_value=10, zero_center=True)
+        sc.pp.pca(adata, svd_solver='arpack')
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
     if embedding_method == "UMAP":
@@ -81,19 +92,20 @@ def scdeed_parameter_selection(adata, n_neighborss, min_dists, rng_seed=None, n_
     c_ = 0
     n_runs = len(n_neighborss) * len(min_dists)
 
+    if layer is None:
+        count_data = adata.X.copy()
+    else:
+        count_data = adata.layers[layer].copy()
+
+    data_temp2 = ad.AnnData(count_data, obs=adata.obs, var=adata.var)
+    data_perm = create_permuted_data_scdeed(data_temp2, rng_seed)
+
     for n_neighbors in n_neighborss:
         for min_dist in min_dists:
             c_ += 1
             print(f"calculating ({n_neighbors}, {min_dist}) - run {c_}/{n_runs}")
 
-            if layer is None:
-                count_data = adata.X
-            else:
-                count_data = adata.layers[layer]
-
-            data_temp2 = ad.AnnData(count_data, obs=adata.obs, var=adata.var)
-
-            data_scdeed = scDEED(data_temp2, rng_seed, n_pcs, n_neighbors, embedding_method, min_dist,
+            data_scdeed = scDEED(data_temp2, data_perm=data_perm, rng_seed=rng_seed, n_pcs=n_pcs, n_neighbors=n_neighbors, embedding_method=embedding_method, min_dist=min_dist,
                                  similarity_percent=similarity_percent)
 
             rel_scores[(n_neighbors, min_dist)] = data_scdeed.obs["reliability_score"].tolist()
@@ -135,7 +147,6 @@ def scdeed_parameter_selection(adata, n_neighborss, min_dists, rng_seed=None, n_
 
 
 def get_opt_setting(scdeed_result):
-
     opt_setting = scdeed_result.loc[scdeed_result["num_dubious"] == np.min(scdeed_result["num_dubious"])]
     n_neighbors_opt = opt_setting["n_neighbors"].values[0]
     min_dist_opt = opt_setting["min_dist"].values[0]

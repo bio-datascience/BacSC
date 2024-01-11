@@ -6,7 +6,7 @@ import scipy.sparse as sps
 import tools.util as ut
 
 
-def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb_mean", epsilon=0.5, min_cells=1, min_genes=1, max_counts=100000, min_counts=1,
+def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb_mean", epsilon=0.5, min_cells=2, min_genes=2, max_counts=100000, min_counts=1,
                         layer=None, seed=None):
 
     count_data = ut.convert_to_dense_counts(adata, layer)
@@ -32,15 +32,15 @@ def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb
 
     # Make anndata object for training data and filter
     adata_train = ad.AnnData(X=sps.csr_matrix(X_train), obs=adata.obs.copy(), var=adata.var.copy())
-    sc.pp.filter_genes(adata_train, min_cells=min_cells)
     sc.pp.filter_cells(adata_train, min_genes=min_genes)
+    sc.pp.filter_genes(adata_train, min_cells=min_cells)
     sc.pp.filter_cells(adata_train, min_counts=min_counts)
     sc.pp.filter_cells(adata_train, max_counts=max_counts)
 
     # filter test data to include same cells/features as training data
     adata_test = ad.AnnData(X=sps.csr_matrix(np.array(X_test)), obs=adata.obs.copy(), var=adata.var.copy())
-    sc.pp.filter_cells(adata_test, min_genes=1)
-    sc.pp.filter_genes(adata_test, min_cells=1)
+    sc.pp.filter_cells(adata_test, min_genes=min_genes)
+    sc.pp.filter_genes(adata_test, min_cells=min_cells)
 
     cells_ind = adata_train.obs.index.intersection(adata_test.obs.index)
     features_ind = adata_train.var.index.intersection(adata_test.var.index)
@@ -53,6 +53,8 @@ def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb
 
     sc.pp.calculate_qc_metrics(adata_test, var_type="PCs", percent_top=None, log1p=True, inplace=True)
     adata_test.layers["counts"] = adata_test.X.copy()
+
+
 
     if data_dist == "NB":
         adata_train.var["nb_mean"] = adata_train.var[mean_key] * epsilon

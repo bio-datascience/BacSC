@@ -95,7 +95,7 @@ def theta_ml(y, mu):
     return t0
 
 
-def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=500, bw_adjust=3, inplace=True):
+def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=100, bw_adjust=3, inplace=True):
     """
     This is a port of SCTransform from the Satija lab. See the R package for original documentation.
 
@@ -199,7 +199,7 @@ def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin
     genes_log_gmean_step1 = genes_log_gmean_step1[filt]
 
     z = FFTKDE(kernel='gaussian', bw='ISJ').fit(genes_log_gmean_step1)
-    z.evaluate();
+    z.evaluate()
     bw = z.bw * bw_adjust
 
     x_points = np.vstack((genes_log_gmean, np.array([min(genes_log_gmean_step1)] * genes_log_gmean.size))).max(0)
