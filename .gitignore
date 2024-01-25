@@ -115,3 +115,5 @@ prototyping/
 .idea/
 data/
 *.pkl
+*.h5ad
+*.h5seurat

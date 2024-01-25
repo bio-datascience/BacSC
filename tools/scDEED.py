@@ -15,8 +15,8 @@ def scDEED(adata, data_perm=None, rng_seed=None, n_pcs=3, n_neighbors=20, embedd
     if data_perm is None:
         data_perm = create_permuted_data_scdeed(adata, rng_seed)
 
-    adata = embed_data_scDEED(adata, n_pcs, n_neighbors, embedding_method, min_dist, perplexity)
-    data_perm = embed_data_scDEED(data_perm, n_pcs, n_neighbors, embedding_method, min_dist, perplexity)
+    adata = embed_data_scDEED(adata, n_pcs, n_neighbors, embedding_method, min_dist, perplexity, rng_seed)
+    data_perm = embed_data_scDEED(data_perm, n_pcs, n_neighbors, embedding_method, min_dist, perplexity, rng_seed)
 
     rel_scores = calculate_reliability_scores(adata, embedding_method, n_pcs, similarity_percent)
     null_rel_scores = calculate_reliability_scores(data_perm, embedding_method, n_pcs, similarity_percent)
@@ -34,27 +34,31 @@ def scDEED(adata, data_perm=None, rng_seed=None, n_pcs=3, n_neighbors=20, embedd
 
 
 def create_permuted_data_scdeed(adata, rng_seed=None):
-    rng = np.random.default_rng(rng_seed)
 
     data_perm = adata.copy()
 
     if type(data_perm.X) == scipy.sparse._csr.csr_matrix:
         data_perm.X = data_perm.X.todense()
 
+    rng = np.random.default_rng(rng_seed)
     data_perm = ad.AnnData(X=scipy.sparse._csr.csr_matrix(rng.permuted(adata.X.copy(), axis=0)))
 
     return data_perm
 
 
-def embed_data_scDEED(adata, n_pcs=3, n_neighbors=20, embedding_method="UMAP", min_dist=0.1, perplexity=30):
+def embed_data_scDEED(adata, n_pcs=3, n_neighbors=20, embedding_method="UMAP", min_dist=0.1, perplexity=30, rng_seed=None):
 
     if "X_pca" not in adata.obsm_keys():
         sc.pp.scale(adata, max_value=10, zero_center=True)
         sc.pp.pca(adata, svd_solver='arpack')
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
+    if rng_seed is None:
+        rng_seed = 0
+
     if embedding_method == "UMAP":
-        sc.tl.umap(adata, neighbors_key="neighbors", min_dist=min_dist, spread=1)
+        sc.tl.umap(adata, neighbors_key="neighbors", min_dist=min_dist, spread=1, random_state=rng_seed)
+        # sc.pl.umap(adata)
     elif embedding_method == "tsne":
         sc.tl.tsne(adata, neighbors_key="neighbors", perplexity=perplexity)
     else:

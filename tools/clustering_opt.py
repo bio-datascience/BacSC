@@ -64,14 +64,14 @@ def mod_weighted(adata, partition_key, resolution, neighbors_key="connectivities
     return np.sum(mod)
 
 
-def cluster_train_test(data_train, data_test, resolutions, alg="leiden"):
+def cluster_train_test(data_train, data_test, resolutions, alg="leiden", random_state=None):
 
     for resolution in resolutions:
         if alg == "leiden":
-            sc.tl.leiden(data_train, resolution=resolution, key_added=f"leiden_res{resolution}")
+            sc.tl.leiden(data_train, resolution=resolution, key_added=f"leiden_res{resolution}", random_state=random_state)
             data_test.obs[f"leiden_res{resolution}"] = data_train.obs[f"leiden_res{resolution}"]
         elif alg == "louvain":
-            sc.tl.louvain(data_train, resolution=resolution, key_added=f"leiden_res{resolution}")
+            sc.tl.louvain(data_train, resolution=resolution, key_added=f"leiden_res{resolution}", random_state=random_state)
             data_test.obs[f"leiden_res{resolution}"] = data_train.obs[f"leiden_res{resolution}"]
 
 
