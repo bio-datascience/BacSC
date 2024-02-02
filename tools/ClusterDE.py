@@ -1,18 +1,7 @@
 import pandas as pd
-import scanpy as sc
 import anndata as ad
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
-import scipy.sparse as sps
 import os
-
-import tools.util_probe as up
-import tools.util as ut
-import tools.NB_est as nb
-import tools.countsplit as cs
-import tools.scDEED as scd
-import tools.clustering_opt as co
 
 os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
@@ -31,11 +20,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-def construct_synthetic_null(adata):
-    adata2 = ad.AnnData(X=adata.layers["counts"].toarray(), obs=adata.obs, var=adata.var)
-    adata2.write("to_seurat.h5ad")
 
-    rp.r("""
+def construct_synthetic_null(adata, save_path):
+    adata2 = ad.AnnData(X=adata.layers["counts"].toarray(), obs=adata.obs, var=adata.var)
+    adata2.write(f"to_seurat.h5ad")
+
+    rp.r(f"""
         library(Seurat)
         library(anndata)
         library(SummarizedExperiment)
@@ -72,7 +62,7 @@ def construct_synthetic_null(adata):
         
         null_data <- CreateSeuratObject(counts = newData$new_count)
         
-        SaveH5Seurat(null_data, filename = 'null_data.h5Seurat', overwrite=TRUE)
+        SaveH5Seurat(null_data, filename = '{save_path}.h5seurat', overwrite=TRUE)
     """)
 
 
@@ -85,12 +75,13 @@ def call_de(target_scores, null_scores, nlog=True, FDR=0.05, correct=False, thre
     p_table["cs"] = p_table["pval_data"] - p_table["pval_null"]
 
     if correct:
-        if PairedData.yuen_t_test(x=p_table["pval_data_log"], y=p_table["pval_null_log"], alternative="greater",
+        if PairedData.yuen_t_test(x=p_table["pval_data"], y=p_table["pval_null"], alternative="greater",
                                   paired=True, tr=0.1)["p.value"] < 0.001:
+            print("correcting...")
             fmla = Formula('y ~ x')
             env = fmla.environment
-            env['x'] = p_table["pval_data_log"]
-            env['y'] = p_table["pval_null_log"]
+            env['y'] = p_table["pval_data"]
+            env['x'] = p_table["pval_null"]
             fit = MASS.rlm(fmla, maxit=100)
             p_table["cs"] = fit["residuals"]
 
@@ -114,13 +105,13 @@ def cs2q(contrastScore, nnull=1, threshold="BC"):
     if threshold == "BC":
         for t in c_abs:
             emp_fdp.append(
-                np.min([(1 / nnull + 1 / nnull * np.sum(contrastScore <= -t)) / np.sum(contrastScore > -t), 1]))
+                np.min([(1 / nnull + 1 / nnull * np.sum(contrastScore <= -t)) / np.sum(contrastScore >= t), 1]))
             if i != 0:
                 emp_fdp[i] = np.min([emp_fdp[i], emp_fdp[i - 1]])
             i += 1
     elif threshold == "DS":
         for t in c_abs:
-            emp_fdp.append(np.min([(1 / nnull * np.sum(contrastScore <= -t)) / np.sum(contrastScore > -t), 1]))
+            emp_fdp.append(np.min([(1 / nnull * np.sum(contrastScore <= -t)) / np.sum(contrastScore >= t), 1]))
             if i != 0:
                 emp_fdp[i] = np.min([emp_fdp[i], emp_fdp[i - 1]])
             i += 1

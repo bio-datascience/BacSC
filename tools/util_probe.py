@@ -39,6 +39,11 @@ def grouped_var_agg(adata, group_key, layer=None, agg_fn=np.max):
         if c % 100 == 0:
             print(f"Aggregating feature {c}/{tot}")
         X = getx(adata[:, idx])
-        out[:, c - 1] = agg_fn(X, axis=1).toarray().reshape(X.shape[0])
+
+        # print(type(X))
+        try:
+            out[:, c - 1] = agg_fn(X, axis=1).toarray().reshape(X.shape[0])
+        except AttributeError:
+            out[:, c - 1] = agg_fn(X, axis=1).reshape(X.shape[0])
 
     return sps.csr_array(out), list(grouped.groups.keys())
