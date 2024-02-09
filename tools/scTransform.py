@@ -233,6 +233,8 @@ def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin
     clip = np.sqrt(X.shape[0] / 30)
     X.data[X.data > clip] = clip
 
+    full_model_pars["is_scd_outlier"] = [x in outliers for x in full_model_pars.index]
+
     if inplace:
         adata.raw = adata.copy()
 
@@ -259,6 +261,7 @@ def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin
         w[gn] = genes_log_gmean
         adata.var['genes_step1_sct'] = z
         adata.var['log10_gmean_sct'] = w
+        adata.var["is_scd_outlier"] = full_model_pars["is_scd_outlier"]
 
     else:
         adata_new = AnnData(X=X)
@@ -279,4 +282,5 @@ def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin
         z[gn[genes_step1]] = 1
         adata_new.var['genes_step1_sct'] = z
         adata_new.var['log10_gmean_sct'] = genes_log_gmean
+        adata_new.var["is_scd_outlier"] = full_model_pars["is_scd_outlier"]
         return adata_new

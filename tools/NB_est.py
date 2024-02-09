@@ -6,6 +6,7 @@ import tools.util as ut
 import tools.scTransform as sct
 
 
+# MB MLE estimation, from https://github.com/gokceneraslan/fit_nbinom/blob/master/fit_nbinom.py
 def fit_nbinom(X, initial_params=None):
     infinitesimal = np.finfo(float).eps
 
@@ -96,6 +97,7 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
                                     bin_size=500,
                                     bw_adjust=3,
                                     inplace=False)
+        adata.var["is_scd_outlier"] = adata_sct.var["is_scd_outlier"]
         adata.var["nb_overdisp"] = adata_sct.var["theta_sct"]
         adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
         adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff

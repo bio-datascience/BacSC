@@ -1,14 +1,17 @@
-library('Seurat')
-library('anndata')
-data <- read_h5ad('/Users/johannes.ostner/Documents/PhD/BacSC/data/MOBA_scRNAseq/outs_S3/test_to_seurat.h5ad')
+library(Seurat)
+library(anndata)
+library(SeuratData)
+library(SummarizedExperiment)
+library(SingleCellExperiment)
+library(SeuratDisk)
+library(scDesign3)
+
+data <- read_h5ad('/Users/johannes.ostner/Documents/PhD/BacSC/analysis/P_aero_S2S3/to_seurat.h5ad')
 data <- CreateSeuratObject(counts = t(data$X), meta.data = data$obs)
-library('SummarizedExperiment')
-library('SingleCellExperiment')
 mat <- GetAssayData(object = data, slot = 'counts')
 sce <- SingleCellExperiment::SingleCellExperiment(list(counts = mat))
 SummarizedExperiment::colData(sce)$cell_type <- '1'
 
-library("scDesign3")
 newData <- scDesign3::scdesign3(sce,
                                 celltype = "cell_type",
                                 pseudotime = NULL,
@@ -20,12 +23,13 @@ newData <- scDesign3::scdesign3(sce,
                                 corr_formula = "1",
                                 family_use = "nb",
                                 nonzerovar = FALSE,
-                                n_cores = 1,
+                                n_cores = 4,
                                 parallelization = "pbmcapply",
                                 important_feature = "auto",
                                 nonnegative = FALSE,
                                 copula = "gaussian",
-                                fastmvn = FALSE)
+                                fastmvn = FALSE,
+                                return_model=TRUE)
 
 
 pbmc <- readRDS("~/Documents/PhD/data/pbmc.rds")

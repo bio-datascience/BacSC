@@ -2,6 +2,9 @@ import pandas as pd
 import anndata as ad
 import numpy as np
 import os
+import tools.NB_est as nb
+import tools.util as ut
+from scipy.stats import nbinom, norm
 
 os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
@@ -124,3 +127,59 @@ def cs2q(contrastScore, nnull=1, threshold="BC"):
     q_ind = [np.where(c_abs == x)[0] for x in contrastScore]
     q = [emp_fdp[x[0]] if len(x) > 0 else 1 for x in q_ind]
     return q
+
+
+def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None):
+
+    """
+    Generate synthetic null data with simplified copula approach from ClusterDE (cf. scDesign 2/3)
+
+    :param adata: AnnData object with layer ["counts"]
+    :return:
+    """
+
+    rng = np.random.default_rng(rng_seed)
+
+    # Estimate Negative binomial parameters with BFGS implementation
+    if ("nb_overdisp" not in adata.var.columns) or ("nb_mean" not in adata.var.columns):
+        nb.estimate_overdisp_nb(adata, layer="counts", flavor="BFGS")
+
+    # Extract nb means, overdispersions and count data and convert parameters to scipy/numpy parametrization
+    nb_means = adata.var["nb_mean"]
+    nb_overdisps = adata.var["nb_overdisp"]
+    r, q = nb.negbin_mean_to_numpy(nb_means, nb_overdisps)
+    r = r.tolist()
+    q = q.tolist()
+    X = ut.convert_to_dense_counts(adata, layer="counts")
+
+    n, p = X.shape
+    if new_data_shape is None:
+        new_data_shape = (n, p)
+
+    # Do counts-to-uniform transforamation from scDesign
+    F = np.array([nbinom.cdf(X[:, j], r[j], q[j]) for j in range(p)]).T
+    F1 = np.array([nbinom.cdf(X[:, j] + 1, r[j], q[j]) for j in range(p)]).T
+
+    V = rng.uniform(0, 1, F.shape)
+    U = V * F + (1 - V) * F1
+
+    # Gaussian Copula
+    U_inv = norm.ppf(U, 0, 1)
+
+    # Estimate correlation matrix
+    R_est = np.corrcoef(U_inv.T)
+    R_est[R_est < 0] = 0
+    R_est = pd.DataFrame(R_est, index=adata.var_names, columns=adata.var_names)
+
+    # Generate new data and do reverse copula transform
+    Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0])
+    Z_cdf = norm.cdf(Z)
+    Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r[j], q[j]) for j in range(new_data_shape[1])]).T
+
+    # Make return anndata object
+    return_data = ad.AnnData(X=Y_gen)
+    if new_data_shape == X.shape:
+        return_data.obs = pd.DataFrame(index=adata.obs.index)
+        return_data.var = pd.DataFrame(index=adata.var.index)
+
+    return return_data
