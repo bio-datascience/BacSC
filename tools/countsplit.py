@@ -115,11 +115,56 @@ def select_n_pcs_countsplit(train_data, test_data, max_k=20):
     return k_devs, opt_k
 
 
-def select_3b_latentdim_countsplit(
-    train_data, test_data, potential_ks=[20, 10, 5, 3], do_warmstart=True
+def select_nmd_t_latentdim_countsplit(
+    train_data,
+    test_data,
+    potential_ks=[20, 10, 5, 3],
+    do_warmstart=True,
+    layer="counts",
+    potential_betas=[0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 ):
-    X_train = ut.convert_to_dense_counts(train_data)
-    X_test = ut.convert_to_dense_counts(test_data)
+    X_train = ut.convert_to_dense_counts(train_data, layer=layer)
+    X_test = ut.convert_to_dense_counts(test_data, layer=layer)
+
+    m, n = X_train.shape
+
+    k_devs = []
+    results = np.zeros((len(potential_ks), len(potential_betas)))
+
+    for i, k in enumerate(potential_ks):
+        print(f"################## LATENT DIM {k}")
+
+        for j, beta in enumerate(potential_betas):
+            print(f"################## BETA {beta}")
+            W0, H0 = nuclear_norm_init(X_train, m, n, k)
+
+            _, W0, H0, _, _, _ = nmd.nmd_t(
+                X_train,
+                r=k,
+                W0=W0,
+                H0=H0,
+                tol_over_10iters=1.0e-4,
+                beta1=beta,
+                verbose=False,
+            )
+            # TODO: IndexError: index 4 is out of bounds for axis 0 with size 4
+            results[i, j] = np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro")
+
+    # opt_k = potential_ks[np.argmin(k_devs)]
+
+    return results
+
+
+def select_3b_latentdim_countsplit(
+    train_data,
+    test_data,
+    potential_ks=[20, 10, 5, 3],
+    do_warmstart=True,
+    layer="counts",
+    beta1=0.6,
+):
+    X_train = ut.convert_to_dense_counts(train_data, layer=layer)
+    X_test = ut.convert_to_dense_counts(test_data, layer=layer)
 
     m, n = X_train.shape
     W0, H0 = nuclear_norm_init(X_train, m, n, potential_ks[0])
@@ -129,11 +174,14 @@ def select_3b_latentdim_countsplit(
     for k in potential_ks:
         print(f"################## LATENT DIM {k}")
         _, W0, H0, _, _, _ = nmd.nmd_3b(
-            X_train, r=k, W0=W0, H0=H0, tol_over_10iters=1.0e-3
+            X_train, r=k, W0=W0, H0=H0, tol_over_10iters=1.0e-3, beta1=beta1
         )
 
         k_devs.append(np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro"))
 
+        if do_warmstart:
+            W0 = W0[:, : (k - 1)]  # nope
+            H0 = H0[: (k - 1), :]  # nope
         if not do_warmstart:
             W0, H0 = nuclear_norm_init(X_train, m, n, k)
 
@@ -147,9 +195,11 @@ def select_anmd_latentdim_countsplit(
     test_data,
     potential_ks=[20, 10, 5, 3],
     do_warmstart=True,
+    layer="counts",
+    beta=0.7,
 ):
-    X_train = ut.convert_to_dense_counts(train_data)
-    X_test = ut.convert_to_dense_counts(test_data)
+    X_train = ut.convert_to_dense_counts(train_data, layer=layer)
+    X_test = ut.convert_to_dense_counts(test_data, layer=layer)
 
     m, n = X_train.shape
     W0, H0 = nuclear_norm_init(X_train, m, n, potential_ks[0])
@@ -167,7 +217,7 @@ def select_anmd_latentdim_countsplit(
             gamma=1.2,
             gamma_bar=1.1,
             eta=0.4,
-            beta=0.7,
+            beta=beta,
         )
         k_devs.append(np.linalg.norm(X_test - np.maximum(0, Theta0), ord="fro"))
 
