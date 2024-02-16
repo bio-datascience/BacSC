@@ -129,7 +129,7 @@ def cs2q(contrastScore, nnull=1, threshold="BC"):
     return q
 
 
-def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None):
+def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS"):
 
     """
     Generate synthetic null data with simplified copula approach from ClusterDE (cf. scDesign 2/3)
@@ -142,7 +142,7 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None):
 
     # Estimate Negative binomial parameters with BFGS implementation
     if ("nb_overdisp" not in adata.var.columns) or ("nb_mean" not in adata.var.columns):
-        nb.estimate_overdisp_nb(adata, layer="counts", flavor="BFGS")
+        nb.estimate_overdisp_nb(adata, layer="counts", flavor=nb_flavor)
 
     # Extract nb means, overdispersions and count data and convert parameters to scipy/numpy parametrization
     nb_means = adata.var["nb_mean"]
@@ -169,7 +169,7 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None):
     # Estimate correlation matrix
     R_est = np.corrcoef(U_inv.T)
     R_est[R_est < 0] = 0
-    R_est = pd.DataFrame(R_est, index=adata.var_names, columns=adata.var_names)
+    # R_est = pd.DataFrame(R_est, index=adata.var_names, columns=adata.var_names).fillna(0)
 
     # Generate new data and do reverse copula transform
     Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0])

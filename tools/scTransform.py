@@ -95,7 +95,7 @@ def theta_ml(y, mu):
     return t0
 
 
-def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=100, bw_adjust=3, inplace=True):
+def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=100, bw_adjust=3, inplace=True):
     """
     This is a port of SCTransform from the Satija lab. See the R package for original documentation.
 
@@ -104,7 +104,10 @@ def SCTransform(adata, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin
     The only significant modification is that negative Pearson residuals are zero'd out to preserve
     the sparsity structure of the data.
     """
-    X = adata.X.copy()
+    if layer is None:
+        X = adata.X.copy()
+    else:
+        X = adata.layers[layer].copy()
     X = sp.sparse.csr_matrix(X)
     X.eliminate_zeros()
     gn = np.array(list(adata.var_names))

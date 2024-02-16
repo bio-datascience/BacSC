@@ -90,6 +90,7 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
 
     elif flavor == "sctransform":
         adata_sct = sct.SCTransform(adata,
+                                    layer=layer,
                                     min_cells=1,
                                     gmean_eps=1,
                                     n_genes=2000,
@@ -103,6 +104,17 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
         adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff
         adata.var["nb_overdisp_cutoff"][np.isnan(adata.var["nb_overdisp_cutoff"])] = cutoff
         adata.var["nb_mean"] = adata_sct.var["Intercept_sct"]
+
+    elif flavor == "mle":
+        count_data = ut.convert_to_dense_counts(adata, layer)
+        means = np.mean(count_data, axis=0)
+        vars = np.var(count_data, axis=0)
+
+        overdisps = means**2 / (vars - means)
+        overdisps[overdisps <= 0] = 0.01
+
+        adata.var["nb_mean"] = means
+        adata.var["nb_overdisp"] = overdisps
 
 
 
