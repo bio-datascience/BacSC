@@ -18,6 +18,8 @@ def scDEED(
     data_perm=None,
     rng_seed=None,
     n_pcs=3,
+    dim_red_method="PCA",
+    dim_red_params=None,
     n_neighbors=20,
     embedding_method="UMAP",
     min_dist=0.1,
@@ -29,17 +31,33 @@ def scDEED(
         data_perm = create_permuted_data_scdeed(adata, rng_seed)
 
     adata = embed_data_scDEED(
-        adata, n_pcs, n_neighbors, embedding_method, min_dist, perplexity, rng_seed
+        adata,
+        n_pcs,
+        dim_red_method,
+        dim_red_params,
+        n_neighbors,
+        embedding_method,
+        min_dist,
+        perplexity,
+        rng_seed,
     )
     data_perm = embed_data_scDEED(
-        data_perm, n_pcs, n_neighbors, embedding_method, min_dist, perplexity, rng_seed
+        data_perm,
+        n_pcs,
+        dim_red_method,
+        dim_red_params,
+        n_neighbors,
+        embedding_method,
+        min_dist,
+        perplexity,
+        rng_seed,
     )
 
     rel_scores = calculate_reliability_scores(
-        adata, embedding_method, n_pcs, similarity_percent
+        adata, embedding_method, n_pcs, dim_red_method, similarity_percent
     )
     null_rel_scores = calculate_reliability_scores(
-        data_perm, embedding_method, n_pcs, similarity_percent
+        data_perm, embedding_method, n_pcs, dim_red_method, similarity_percent
     )
 
     null_percentile_dubious = np.percentile(null_rel_scores, 5)
@@ -78,6 +96,8 @@ def create_permuted_data_scdeed(adata, rng_seed=None):
 def embed_data_scDEED(
     adata,
     n_pcs=3,
+    dim_red_method="PCA",
+    dim_red_params=None,
     n_neighbors=20,
     embedding_method="UMAP",
     min_dist=0.1,
@@ -85,27 +105,57 @@ def embed_data_scDEED(
     rng_seed=None,
 ):
 
-    # if "X_pca" not in adata.obsm_keys():
-    #    sc.pp.scale(adata, max_value=10, zero_center=True)
-    #    sc.pp.pca(adata, svd_solver="arpack")
-    # sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
-    if "X_3b" not in adata.obsm.keys():
-        m, n = adata.X.shape
-        # X_anmd = ut.convert_to_dense_counts(adata, layer="normalized_counts")
-        X_anmd = ut.convert_to_dense_counts(adata)
-        m, n = X_anmd.shape
-        W0, H0 = cs.nuclear_norm_init(X_anmd, m, n, n_pcs)
-        _, W_nmd, _, _, _, _ = nmd.nmd_t(
-            X_anmd,
-            r=n_pcs,
-            W0=W0,
-            H0=H0,
-            beta1=0.95,
-            tol_over_10iters=1e-4,
-            verbose=False,
-        )
-        adata.obsm["X_3b"] = W_nmd
-    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep="X_3b")
+    match dim_red_method:
+        case "PCA":
+            if "X_pca" not in adata.obsm_keys():
+                sc.pp.scale(adata, max_value=10, zero_center=True)
+                sc.pp.pca(adata, svd_solver="arpack")
+            sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
+        case "NMD_T":
+            if "X_nmdt" not in adata.obsm.keys():
+                beta = dim_red_params.get("beta")
+                tol_over_10iters = dim_red_params.get("tol_over_10iters")
+                m, n = adata.X.shape
+                # X_anmd = ut.convert_to_dense_counts(adata, layer="normalized_counts")
+                X = ut.convert_to_dense_counts(adata)
+                m, n = X.shape
+                W0, H0 = cs.nuclear_norm_init(X, m, n, n_pcs)
+                _, W_nmd, _, _, _, _ = nmd.nmd_t(
+                    X,
+                    r=n_pcs,
+                    W0=W0,
+                    H0=H0,
+                    beta1=beta,
+                    tol_over_10iters=tol_over_10iters,
+                    verbose=False,
+                )
+                adata.obsm["X_nmdt"] = W_nmd
+            sc.pp.neighbors(
+                adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep="X_nmdt"
+            )
+        case "3B-NMD":
+            if "X_3b" not in adata.obsm.keys():
+                beta = dim_red_params.get("beta1")
+                tol_over_10iters = dim_red_params.get("tol_over_10iters")
+                m, n = adata.X.shape
+                X = ut.convert_to_dense_counts(adata)
+                m, n = X.shape
+                W0, H0 = cs.nuclear_norm_init(X, m, n, n_pcs)
+                _, W_nmd, _, _, _, _ = nmd.nmd_3b(
+                    X,
+                    r=n_pcs,
+                    W0=W0,
+                    H0=H0,
+                    beta1=beta,
+                    tol_over_10iters=tol_over_10iters,
+                    verbose=False,
+                )
+                adata.obsm["X_3b"] = W_nmd
+            sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep="X_3b")
+        case _:
+            raise ValueError(
+                f"{dim_red_method} is not a valid dimensionality reduction method!"
+            )
 
     if rng_seed is None:
         rng_seed = 0
@@ -128,7 +178,11 @@ def embed_data_scDEED(
 
 
 def calculate_reliability_scores(
-    adata, embedding_method="UMAP", n_pcs=3, similarity_percent=0.5
+    adata,
+    embedding_method="UMAP",
+    n_pcs=3,
+    dim_red_method="PCA",
+    similarity_percent=0.5,
 ):
     n, p = adata.X.shape
     n_rel = int(similarity_percent * n)
@@ -140,8 +194,17 @@ def calculate_reliability_scores(
     else:
         raise ValueError(f"{embedding_method} is not a valid embedding method!")
 
-    # dist_pca = squareform(pdist(adata.obsm["X_pca"][:, :n_pcs], metric="euclidean"))
-    dist_pca = squareform(pdist(adata.obsm["X_3b"][:, :n_pcs], metric="euclidean"))
+    match dim_red_method:
+        case "PCA":
+            obsm_layer_embeddings = "X_pca"
+        case "NMD_T":
+            obsm_layer_embeddings = "X_nmdt"
+        case "NMD_3b":
+            obsm_layer_embeddings = "X_nmd3b"
+
+    dist_pca = squareform(
+        pdist(adata.obsm[obsm_layer_embeddings][:, :n_pcs], metric="euclidean")
+    )
 
     closest_embed_dist = [
         dist_embed[i, np.argpartition(dist_embed[i], n_rel)[:n_rel]] for i in range(n)
@@ -163,8 +226,10 @@ def scdeed_parameter_selection(
     min_dists,
     rng_seed=None,
     n_pcs=3,
+    dim_red_method="PCA",
     embedding_method="UMAP",
     similarity_percent=0.5,
+    dim_red_params=None,
     layer=None,
     save_path=None,
 ):
@@ -193,6 +258,8 @@ def scdeed_parameter_selection(
                 data_perm=data_perm,
                 rng_seed=rng_seed,
                 n_pcs=n_pcs,
+                dim_red_method=dim_red_method,
+                dim_red_params=dim_red_params,
                 n_neighbors=n_neighbors,
                 embedding_method=embedding_method,
                 min_dist=min_dist,

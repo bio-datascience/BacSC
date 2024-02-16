@@ -2,11 +2,14 @@ import numpy as np
 import anndata as ad
 import scanpy as sc
 import scipy.sparse as sps
+import pandas as pd
+from itertools import product
 
 import tools.util as ut
 
 import tools.NMD as nmd
 from scipy.sparse.linalg import svds
+from nuclear_norm_init import nuclear_norm_init
 
 
 def countsplit_adata(
@@ -115,82 +118,97 @@ def select_n_pcs_countsplit(train_data, test_data, max_k=20):
     return k_devs, opt_k
 
 
-def select_nmd_t_latentdim_countsplit(
+def select_nmd_t_params_countsplit(
     train_data,
     test_data,
     potential_ks=[20, 10, 5, 3],
     do_warmstart=True,
     layer="counts",
     potential_betas=[0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    tol_over_10iters=1.0e-4,
 ):
     X_train = ut.convert_to_dense_counts(train_data, layer=layer)
     X_test = ut.convert_to_dense_counts(test_data, layer=layer)
 
     m, n = X_train.shape
 
-    k_devs = []
-    results = np.zeros((len(potential_ks), len(potential_betas)))
+    results_df = generate_dataframe(
+        k=potential_ks, beta=potential_betas, val_colname="loss"
+    )
 
-    for i, k in enumerate(potential_ks):
+    for k in potential_ks:
         print(f"################## LATENT DIM {k}")
+        W0, H0 = nuclear_norm_init(X_train, m, n, k)
 
-        for j, beta in enumerate(potential_betas):
+        for beta in potential_betas:
             print(f"################## BETA {beta}")
-            W0, H0 = nuclear_norm_init(X_train, m, n, k)
 
             _, W0, H0, _, _, _ = nmd.nmd_t(
                 X_train,
                 r=k,
                 W0=W0,
                 H0=H0,
-                tol_over_10iters=1.0e-4,
+                tol_over_10iters=tol_over_10iters,
                 beta1=beta,
                 verbose=False,
             )
             # TODO: IndexError: index 4 is out of bounds for axis 0 with size 4
-            results[i, j] = np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro")
+            results_df = add_result(
+                results_df,
+                val_col="loss",
+                val=np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro"),
+                k=k,
+                beta=beta,
+            )
 
-    # opt_k = potential_ks[np.argmin(k_devs)]
-
-    return results
+    return results_df
 
 
-def select_3b_latentdim_countsplit(
+def select_3b_params_countsplit(
     train_data,
     test_data,
     potential_ks=[20, 10, 5, 3],
-    do_warmstart=True,
     layer="counts",
-    beta1=0.6,
+    potential_betas=[0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    tol_over_10iters=1.0e-4,
 ):
     X_train = ut.convert_to_dense_counts(train_data, layer=layer)
     X_test = ut.convert_to_dense_counts(test_data, layer=layer)
 
     m, n = X_train.shape
-    W0, H0 = nuclear_norm_init(X_train, m, n, potential_ks[0])
 
-    k_devs = []
+    results_df = generate_dataframe(
+        k=potential_ks, beta=potential_betas, val_colname="loss"
+    )
 
     for k in potential_ks:
         print(f"################## LATENT DIM {k}")
-        _, W0, H0, _, _, _ = nmd.nmd_3b(
-            X_train, r=k, W0=W0, H0=H0, tol_over_10iters=1.0e-3, beta1=beta1
-        )
 
-        k_devs.append(np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro"))
-
-        if do_warmstart:
-            W0 = W0[:, : (k - 1)]  # nope
-            H0 = H0[: (k - 1), :]  # nope
-        if not do_warmstart:
+        for beta in potential_betas:
+            print(f"################## BETA {beta}")
             W0, H0 = nuclear_norm_init(X_train, m, n, k)
 
-    opt_k = potential_ks[np.argmin(k_devs)]
+            _, W0, H0, _, _, _ = nmd.nmd_3b(
+                X_train,
+                r=k,
+                W0=W0,
+                H0=H0,
+                tol_over_10iters=tol_over_10iters,
+                beta1=beta,
+            )
 
-    return k_devs, opt_k
+            results_df = add_result(
+                results_df,
+                val_col="loss",
+                val=np.linalg.norm(X_test - np.maximum(0, W0 @ H0), ord="fro"),
+                k=k,
+                beta=beta,
+            )
+
+    return results_df
 
 
-def select_anmd_latentdim_countsplit(
+def select_anmd_params_countsplit(
     train_data,
     test_data,
     potential_ks=[20, 10, 5, 3],
@@ -231,54 +249,49 @@ def select_anmd_latentdim_countsplit(
     return k_devs, opt_k
 
 
-def nuclear_norm_init(
-    X: np.ndarray, m: int, n: int, r: int, seed: int = 1293871, verbose: bool = False
-) -> (np.ndarray, np.ndarray):
-    rng = np.random.default_rng(seed=seed)
-    Theta1 = rng.standard_normal(size=(m, n))
-    Theta2, _ = nmd_nuclear_bt(X, Theta1, 3, verbose=verbose)
-    ua, sa, va = np.linalg.svd(Theta2, full_matrices=False)
-    sa = np.diag(sa)[:r, :r]
-    W0 = ua[:, :r]
-    H0 = sa @ va[:r, :]
-    return W0, H0
+def generate_dataframe(*args, val_colname="loss"):
+    """
+    Generate a pandas DataFrame with all combinations of values from the input lists.
+
+    Parameters:
+        *args: Variable number of lists containing values to generate combinations from.
+        val_colname: The name of the last column (type: float). Defaults to loss.
+
+    Returns:
+        pd.DataFrame: DataFrame containing all combinations of values from the input lists.
+                      The DataFrame has columns named 'x1', 'x2', ... for each input list,
+                      and an additional 'loss' column which is initialized with NaN values.
+    """
+    # Generate all combinations of lists
+    combinations = list(product(*args))
+
+    # Create DataFrame with columns based on number of input lists
+    columns = [f"x{i+1}" for i in range(len(args))]
+    df = pd.DataFrame(combinations, columns=columns)
+    df[val_colname] = pd.Series(dtype=float)  # Creating an empty column
+
+    return df
 
 
-def nmd_nuclear_bt(
-    X: np.typing.ArrayLike,
-    Theta: np.typing.ArrayLike,
-    max_iter: int,
-    verbose: bool = False,
-) -> (np.ndarray, list[float]):
-    assert np.all(X >= 0)
+def add_result(df, val_col, val, **kwargs):
+    """
+    Assign a value to the specified column based on the values of the input lists.
 
-    x_is_zero = X == 0
-    x_is_pos = np.invert(x_is_zero)
+    Parameters:
+        df (pd.DataFrame): DataFrame to update.
+        val_col (str): Name of the column to assign the value.
+        val: Value to assign.
+        **kwargs: Keyword arguments representing the values of the input lists.
 
-    alpha = 1 / 1**0.1  # Initial choice for alpha
-    Theta[x_is_pos] = X[x_is_pos]  # Set the fixed components of Theta
-    Theta[x_is_zero] = np.minimum(0, Theta[x_is_zero])
+    Returns:
+        pd.DataFrame: Updated DataFrame with the specified value assigned to the column.
+    """
+    # Filter DataFrame based on provided values
+    mask = pd.Series(True, index=df.index)
+    for key, value in kwargs.items():
+        mask &= df[key] == value
 
-    nuclear_norms = []
+    # Assign value to specified column
+    df.loc[mask, val_col] = val
 
-    for i in range(max_iter):
-        if verbose:
-            print(f"Iteration { i + 1 } out of { max_iter }")
-        U, D, Vt = np.linalg.svd(Theta, full_matrices=False)
-        nuclear_norms.append(np.sum(np.diag(D)))  # Nuclear norm eval
-
-        # backtracking
-        if i > 0 and nuclear_norms[i] < nuclear_norms[i - 1]:
-            alpha *= 1.2
-        else:
-            alpha *= 0.7
-
-        # Update Theta
-        # Theta = Theta - alpha * (U @ Vt)
-        Theta -= alpha * (U @ Vt)
-
-        # Project Theta
-        Theta[x_is_pos] = X[x_is_pos]
-        Theta[x_is_zero] = np.minimum(0, Theta[x_is_zero])
-
-    return Theta, nuclear_norms
+    return df
