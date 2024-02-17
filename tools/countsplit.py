@@ -9,7 +9,7 @@ import tools.util as ut
 
 import tools.NMD as nmd
 from scipy.sparse.linalg import svds
-from nuclear_norm_init import nuclear_norm_init
+from tools.nuclear_norm_init import nuclear_norm_init
 
 
 def countsplit_adata(
@@ -122,7 +122,6 @@ def select_nmd_t_params_countsplit(
     train_data,
     test_data,
     potential_ks=[20, 10, 5, 3],
-    do_warmstart=True,
     layer="counts",
     potential_betas=[0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     tol_over_10iters=1.0e-4,
@@ -195,6 +194,7 @@ def select_3b_params_countsplit(
                 H0=H0,
                 tol_over_10iters=tol_over_10iters,
                 beta1=beta,
+                verbose=False,
             )
 
             results_df = add_result(
@@ -249,24 +249,27 @@ def select_anmd_params_countsplit(
     return k_devs, opt_k
 
 
-def generate_dataframe(*args, val_colname="loss"):
+def generate_dataframe(val_colname="loss", **kwargs):
     """
-    Generate a pandas DataFrame with all combinations of values from the input lists.
+    Generate a pandas DataFrame with all combinations of values from the input dictionaries.
 
     Parameters:
-        *args: Variable number of lists containing values to generate combinations from.
-        val_colname: The name of the last column (type: float). Defaults to loss.
+        val_colname (str): Name for the empty column. Default is 'loss'.
+        **kwargs: Variable number of dictionaries containing column names as keys and values to generate combinations from.
 
     Returns:
-        pd.DataFrame: DataFrame containing all combinations of values from the input lists.
-                      The DataFrame has columns named 'x1', 'x2', ... for each input list,
-                      and an additional 'loss' column which is initialized with NaN values.
+        pd.DataFrame: DataFrame containing all combinations of values from the input dictionaries.
+                      The DataFrame has columns specified by the keys of the dictionaries,
+                      and an additional empty column with the specified name.
     """
-    # Generate all combinations of lists
-    combinations = list(product(*args))
+    # Extract column names and values from kwargs
+    columns = list(kwargs.keys())
+    values = list(kwargs.values())
 
-    # Create DataFrame with columns based on number of input lists
-    columns = [f"x{i+1}" for i in range(len(args))]
+    # Generate all combinations of values
+    combinations = list(product(*values))
+
+    # Create DataFrame with columns based on column names
     df = pd.DataFrame(combinations, columns=columns)
     df[val_colname] = pd.Series(dtype=float)  # Creating an empty column
 
