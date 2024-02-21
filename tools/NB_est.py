@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.special import gammaln, factorial
 from scipy.optimize import fmin_l_bfgs_b as optim
+from statsmodels.discrete.count_model import NegativeBinomialP, ZeroInflatedNegativeBinomialP, Poisson, ZeroInflatedPoisson
+from scipy.stats import logistic, chi2
 
 import tools.util as ut
 import tools.scTransform as sct
@@ -105,7 +107,7 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
         adata.var["nb_overdisp_cutoff"][np.isnan(adata.var["nb_overdisp_cutoff"])] = cutoff
         adata.var["nb_mean"] = adata_sct.var["Intercept_sct"]
 
-    elif flavor == "mle":
+    elif flavor == "moments":
         count_data = ut.convert_to_dense_counts(adata, layer)
         means = np.mean(count_data, axis=0)
         vars = np.var(count_data, axis=0)
@@ -116,6 +118,94 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
         adata.var["nb_mean"] = means
         adata.var["nb_overdisp"] = overdisps
 
+    elif flavor == "statsmod_nb":
+        count_data = ut.convert_to_dense_counts(adata, layer)
+        n, p = count_data.shape
 
+        overdisps = []
+        means = []
 
+        for i in range(p):
+
+            if i % 100 == 0:
+                print(f"gene {i}")
+
+            dat = count_data[:, i].T
+
+            model_nb = NegativeBinomialP(dat, np.ones(n))
+            res_nb = model_nb.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+            means.append(np.exp(res_nb.params[0]))
+            overdisps.append(1/res_nb.params[1])
+
+        adata.var["nb_mean"] = means
+        adata.var["nb_overdisp"] = overdisps
+
+    elif flavor == "statsmod_auto":
+        count_data = ut.convert_to_dense_counts(adata, layer)
+        n, p = count_data.shape
+
+        adata.var["gene_mean"] = np.mean(count_data, axis=0)
+        adata.var["gene_var"] = np.var(count_data, axis=0)
+        adata.var["mean_var_diff"] = adata.var["gene_mean"] - adata.var["gene_var"]
+        adata.var["gene_dist"] = ["nb" if x < 0 else "poi" for x in adata.var["mean_var_diff"]]
+
+        overdisps = []
+        means = []
+        zinf_params = []
+
+        for i in range(p):
+
+            if i % 100 == 0:
+                print(f"gene {i}")
+
+            dat = count_data[:, i].T
+            dist = adata.var["gene_dist"][i]
+
+            if dist == "poi":
+                overdisps.append(np.inf)
+
+                model_zipoi = ZeroInflatedPoisson(dat, np.ones(n))
+                res_zipoi = model_zipoi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+
+                model_poi = Poisson(dat, np.ones(n))
+                res_poi = model_poi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+
+                zipoi_loglik = res_zipoi.llf
+                poi_loglik = res_poi.llf
+
+                stat = 2 * (zipoi_loglik - poi_loglik)
+                pvalue = 1 - chi2.ppf(stat, 1)
+
+                if pvalue < 0.05:
+                    means.append(np.exp(res_zipoi.params[1]))
+                    zinf_params.append(logistic.pdf(res_zipoi.params[0]))
+                else:
+                    means.append(np.exp(res_poi.params[0]))
+                    zinf_params.append(0.)
+
+            elif dist == "nb":
+                model_zinb = ZeroInflatedNegativeBinomialP(dat, np.ones(n))
+                res_zinb = model_zinb.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+
+                model_nb = NegativeBinomialP(dat, np.ones(n))
+                res_nb = model_nb.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+
+                zinb_loglik = res_zinb.llf
+                nb_loglik = res_nb.llf
+
+                stat = 2 * (zinb_loglik - nb_loglik)
+                pvalue = 1 - chi2.ppf(stat, 1)
+
+                if pvalue < 0.05 or np.isnan(nb_loglik):
+                    means.append(np.exp(res_zinb.params[1]))
+                    zinf_params.append(logistic.pdf(res_zinb.params[0]))
+                    overdisps.append(1 / res_zinb.params[2])
+                else:
+                    means.append(np.exp(res_nb.params[0]))
+                    zinf_params.append(0.)
+                    overdisps.append(1 / res_nb.params[1])
+
+        adata.var["est_mean"] = means
+        adata.var["est_overdisp"] = overdisps
+        adata.var["est_zero_inflation"] = zinf_params
 

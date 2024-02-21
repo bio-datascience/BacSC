@@ -4,7 +4,7 @@ import numpy as np
 import os
 import tools.NB_est as nb
 import tools.util as ut
-from scipy.stats import nbinom, norm
+from scipy.stats import nbinom, norm, poisson
 
 os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
@@ -73,18 +73,22 @@ def call_de(target_scores, null_scores, nlog=True, FDR=0.05, correct=False, thre
 
     p_table = pd.merge(target_scores, null_scores, left_index=True, right_index=True)
     if nlog:
-        p_table["pval_data"] = -1 * np.log10(p_table["pval_data"])
-        p_table["pval_null"] = -1 * np.log10(p_table["pval_null"])
-    p_table["cs"] = p_table["pval_data"] - p_table["pval_null"]
+        p_table["pval_trafo_data"] = -1 * np.log10(p_table["pval_data"])
+        p_table["pval_trafo_null"] = -1 * np.log10(p_table["pval_null"])
+    else:
+        p_table["pval_trafo_data"] = p_table["pval_data"]
+        p_table["pval_trafo_null"] = p_table["pval_null"]
+
+    p_table["cs"] = p_table["pval_trafo_data"] - p_table["pval_trafo_null"]
 
     if correct:
-        if PairedData.yuen_t_test(x=p_table["pval_data"], y=p_table["pval_null"], alternative="greater",
+        if PairedData.yuen_t_test(x=p_table["pval_trafo_data"], y=p_table["pval_trafo_null"], alternative="greater",
                                   paired=True, tr=0.1)["p.value"] < 0.001:
             print("correcting...")
             fmla = Formula('y ~ x')
             env = fmla.environment
-            env['y'] = p_table["pval_data"]
-            env['x'] = p_table["pval_null"]
+            env['y'] = p_table["pval_trafo_data"]
+            env['x'] = p_table["pval_trafo_null"]
             fit = MASS.rlm(fmla, maxit=100)
             p_table["cs"] = fit["residuals"]
 
@@ -129,7 +133,38 @@ def cs2q(contrastScore, nnull=1, threshold="BC"):
     return q
 
 
-def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS"):
+def dist_cdf_selector(X, intercept, overdisp, zinf_param):
+    if overdisp == np.inf:
+        cdf = poisson.cdf(X, intercept)
+    else:
+        r, q = nb.negbin_mean_to_numpy(intercept, overdisp)
+        cdf = nbinom.cdf(X, r, q)
+
+    if zinf_param != 0:
+        cdf = zinf_param + (1 - zinf_param) * cdf
+
+    return cdf
+
+
+def dist_ppf_selector(X, intercept, overdisp, zinf_param):
+    if zinf_param != 0:
+        X_ = (X - zinf_param) / (1 - zinf_param)
+    else:
+        X_ = X
+
+    if overdisp == np.inf:
+        ppf = poisson.ppf(X_, intercept)
+    else:
+        r, q = nb.negbin_mean_to_numpy(intercept, overdisp)
+        ppf = nbinom.ppf(X_, r, q)
+
+    if zinf_param != 0:
+        ppf[X < zinf_param] = 0
+
+    return ppf
+
+
+def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS", auto_dist=False):
 
     """
     Generate synthetic null data with simplified copula approach from ClusterDE (cf. scDesign 2/3)
@@ -141,15 +176,24 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
     rng = np.random.default_rng(rng_seed)
 
     # Estimate Negative binomial parameters with BFGS implementation
-    if ("nb_overdisp" not in adata.var.columns) or ("nb_mean" not in adata.var.columns):
-        nb.estimate_overdisp_nb(adata, layer="counts", flavor=nb_flavor)
+
 
     # Extract nb means, overdispersions and count data and convert parameters to scipy/numpy parametrization
-    nb_means = adata.var["nb_mean"]
-    nb_overdisps = adata.var["nb_overdisp"]
-    r, q = nb.negbin_mean_to_numpy(nb_means, nb_overdisps)
-    r = r.tolist()
-    q = q.tolist()
+    if auto_dist:
+        if ("est_overdisp" not in adata.var.columns) or ("est_mean" not in adata.var.columns) or ("est_zero_inflation" not in adata.var.columns):
+            nb.estimate_overdisp_nb(adata, layer="counts", flavor=nb_flavor)
+        means = adata.var["est_mean"]
+        overdisps = adata.var["est_overdisp"]
+        zinfs = adata.var["est_zero_inflation"]
+    else:
+        if ("nb_overdisp" not in adata.var.columns) or ("nb_mean" not in adata.var.columns):
+            nb.estimate_overdisp_nb(adata, layer="counts", flavor=nb_flavor)
+        nb_means = adata.var["nb_mean"]
+        nb_overdisps = adata.var["nb_overdisp"]
+        r, q = nb.negbin_mean_to_numpy(nb_means, nb_overdisps)
+        r = r.tolist()
+        q = q.tolist()
+
     X = ut.convert_to_dense_counts(adata, layer="counts")
 
     n, p = X.shape
@@ -157,8 +201,13 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
         new_data_shape = (n, p)
 
     # Do counts-to-uniform transforamation from scDesign
-    F = np.array([nbinom.cdf(X[:, j], r[j], q[j]) for j in range(p)]).T
-    F1 = np.array([nbinom.cdf(X[:, j] + 1, r[j], q[j]) for j in range(p)]).T
+    if auto_dist:
+        F = np.array([dist_cdf_selector(X[:, j], means[j], overdisps[j], zinfs[j]) for j in range(p)]).T
+        F1 = np.array([dist_cdf_selector(X[:, j] + 1, means[j], overdisps[j], zinfs[j]) for j in range(p)]).T
+
+    else:
+        F = np.array([nbinom.cdf(X[:, j], r[j], q[j]) for j in range(p)]).T
+        F1 = np.array([nbinom.cdf(X[:, j] + 1, r[j], q[j]) for j in range(p)]).T
 
     V = rng.uniform(0, 1, F.shape)
     U = V * F + (1 - V) * F1
@@ -169,12 +218,16 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
     # Estimate correlation matrix
     R_est = np.corrcoef(U_inv.T)
     R_est[R_est < 0] = 0
-    # R_est = pd.DataFrame(R_est, index=adata.var_names, columns=adata.var_names).fillna(0)
+    R_est = np.nan_to_num(R_est, nan=0, posinf=1, neginf=-1)
 
     # Generate new data and do reverse copula transform
     Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0])
     Z_cdf = norm.cdf(Z)
-    Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r[j], q[j]) for j in range(new_data_shape[1])]).T
+    if auto_dist:
+        Y_gen = np.array([dist_ppf_selector(Z_cdf[:, j], means[j], overdisps[j], zinfs[j]) for j in
+                          range(new_data_shape[1])]).T
+    else:
+        Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r[j], q[j]) for j in range(new_data_shape[1])]).T
 
     # Make return anndata object
     return_data = ad.AnnData(X=Y_gen)
