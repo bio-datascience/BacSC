@@ -164,7 +164,7 @@ def dist_ppf_selector(X, intercept, overdisp, zinf_param):
     return ppf
 
 
-def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS", auto_dist=False):
+def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS", auto_dist=False, return_R=False, var_factor=1, R_metric="corr"):
 
     """
     Generate synthetic null data with simplified copula approach from ClusterDE (cf. scDesign 2/3)
@@ -212,13 +212,36 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
     V = rng.uniform(0, 1, F.shape)
     U = V * F + (1 - V) * F1
 
+    temp = np.where(U == 1)
+    print([F[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
+    print("")
+    print([F1[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
+    print("")
+    print([V[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
+    print("")
+    print([X[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
+
+    import seaborn as sns
+    sns.histplot(X[:, temp[1][0]], binwidth=1)
+
+    U[U == 1] = 0.99999
+
     # Gaussian Copula
     U_inv = norm.ppf(U, 0, 1)
 
     # Estimate correlation matrix
-    R_est = np.corrcoef(U_inv.T)
-    R_est[R_est < 0] = 0
-    R_est = np.nan_to_num(R_est, nan=0, posinf=1, neginf=-1)
+    if R_metric == "corr":
+        R_est = np.corrcoef(U_inv.T)
+    elif R_metric == "cov":
+        R_est = np.cov(U_inv.T)
+
+    print(np.diagonal(R_est))
+
+    np.fill_diagonal(R_est, R_est.diagonal() * var_factor)
+    print(np.diagonal(R_est))
+
+    # R_est[R_est < 0] = 0
+    # R_est = np.nan_to_num(R_est, nan=0, posinf=0.999, neginf=-0.999)
 
     # Generate new data and do reverse copula transform
     Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0])
@@ -235,4 +258,7 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
         return_data.obs = pd.DataFrame(index=adata.obs.index)
         return_data.var = pd.DataFrame(index=adata.var.index)
 
-    return return_data
+    if return_R:
+        return return_data, R_est
+    else:
+        return return_data
