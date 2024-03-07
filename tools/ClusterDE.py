@@ -4,7 +4,7 @@ import numpy as np
 import os
 import tools.NB_est as nb
 import tools.util as ut
-from scipy.stats import nbinom, norm, poisson
+from scipy.stats import nbinom, norm, poisson, spearmanr
 
 os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
@@ -21,7 +21,7 @@ from rpy2.robjects import Formula
 
 import warnings
 
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 
 def construct_synthetic_null(adata, save_path):
@@ -164,7 +164,19 @@ def dist_ppf_selector(X, intercept, overdisp, zinf_param):
     return ppf
 
 
-def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor="BFGS", auto_dist=False, return_R=False, var_factor=1, R_metric="corr"):
+def generate_nb_data_copula(
+        adata,
+        R_est=None,
+        rng_seed=1234,
+        new_data_shape=None,
+        nb_flavor="BFGS",
+        auto_dist=False,
+        return_R=False,
+        correct_var=False,
+        R_metric="corr",
+        corr_factor=1,
+        check_pd=True
+):
 
     """
     Generate synthetic null data with simplified copula approach from ClusterDE (cf. scDesign 2/3)
@@ -200,57 +212,53 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
     if new_data_shape is None:
         new_data_shape = (n, p)
 
-    # Do counts-to-uniform transforamation from scDesign
-    if auto_dist:
-        F = np.array([dist_cdf_selector(X[:, j], means[j], overdisps[j], zinfs[j]) for j in range(p)]).T
-        F1 = np.array([dist_cdf_selector(X[:, j] + 1, means[j], overdisps[j], zinfs[j]) for j in range(p)]).T
+    if R_est is None:
+        # Do counts-to-uniform transforamation from scDesign
+        if auto_dist:
+            F = np.array([dist_cdf_selector(X[:, j], means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in range(p)]).T
+            F1 = np.array([dist_cdf_selector(X[:, j] + 1, means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in range(p)]).T
 
-    else:
-        F = np.array([nbinom.cdf(X[:, j], r[j], q[j]) for j in range(p)]).T
-        F1 = np.array([nbinom.cdf(X[:, j] + 1, r[j], q[j]) for j in range(p)]).T
+        else:
+            F = np.array([nbinom.cdf(X[:, j], r.iloc[j], q.iloc[j]) for j in range(p)]).T
+            F1 = np.array([nbinom.cdf(X[:, j] + 1, r.iloc[j], q.iloc[j]) for j in range(p)]).T
 
-    V = rng.uniform(0, 1, F.shape)
-    U = V * F + (1 - V) * F1
+        V = rng.uniform(0, 1, F.shape)
+        U = V * F + (1 - V) * F1
+        U[U == 1] = 0.99999
 
-    temp = np.where(U == 1)
-    print([F[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
-    print("")
-    print([F1[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
-    print("")
-    print([V[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
-    print("")
-    print([X[temp[0][i], temp[1][i]] for i in range(len(temp[0]))])
+        # Gaussian Copula
+        U_inv = norm.ppf(U, 0, 1)
 
-    import seaborn as sns
-    sns.histplot(X[:, temp[1][0]], binwidth=1)
+        # Estimate correlation matrix
+        if R_metric == "corr":
+            if correct_var:
+                R_est = schaefer_strimmer(U_inv, use_corr=True)
+            else:
+                R_est = np.corrcoef(U_inv.T)
+        elif R_metric == "cov":
+            R_est = np.cov(U_inv.T)
 
-    U[U == 1] = 0.99999
+    R_est = np.maximum(np.minimum(R_est * corr_factor, 1), -1)
+    np.fill_diagonal(R_est, 1)
 
-    # Gaussian Copula
-    U_inv = norm.ppf(U, 0, 1)
-
-    # Estimate correlation matrix
-    if R_metric == "corr":
-        R_est = np.corrcoef(U_inv.T)
-    elif R_metric == "cov":
-        R_est = np.cov(U_inv.T)
-
-    print(np.diagonal(R_est))
-
-    np.fill_diagonal(R_est, R_est.diagonal() * var_factor)
-    print(np.diagonal(R_est))
-
-    # R_est[R_est < 0] = 0
-    # R_est = np.nan_to_num(R_est, nan=0, posinf=0.999, neginf=-0.999)
+    if check_pd:
+        eigenvals, eigenvecs = np.linalg.eigh(R_est)
+        min_ev = np.min(eigenvals)
+        if min_ev < 0:
+            warnings.warn("R_est is not positive definite! Adjusting eigenvalues...")
+            new_ev = eigenvals - (min_ev - 1e-12)
+            R_est = eigenvecs @ np.diag(new_ev) @ np.linalg.inv(eigenvecs)
+            # Is = np.sqrt(1 / np.diag(R_est))
+            # R_est = R_est * Is.reshape(-1, 1) * Is.reshape(1, -1)
 
     # Generate new data and do reverse copula transform
-    Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0])
+    Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0], method="eigh", check_valid="raise")
     Z_cdf = norm.cdf(Z)
     if auto_dist:
-        Y_gen = np.array([dist_ppf_selector(Z_cdf[:, j], means[j], overdisps[j], zinfs[j]) for j in
+        Y_gen = np.array([dist_ppf_selector(Z_cdf[:, j], means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in
                           range(new_data_shape[1])]).T
     else:
-        Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r[j], q[j]) for j in range(new_data_shape[1])]).T
+        Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r.iloc[j], q.iloc[j]) for j in range(new_data_shape[1])]).T
 
     # Make return anndata object
     return_data = ad.AnnData(X=Y_gen)
@@ -262,3 +270,101 @@ def generate_nb_data_copula(adata, rng_seed=1234, new_data_shape=None, nb_flavor
         return return_data, R_est
     else:
         return return_data
+
+def schaefer_strimmer(X, use_corr=False):
+
+    n, p = X.shape
+
+    w = (X - X.mean(axis=0, keepdims=True))**2
+    w_bar = np.mean(w, axis=0)
+    var_unb = (n / (n - 1)) * w_bar
+    var_s = (n / (n - 1) ** 3) * np.sum((w - w_bar) ** 2, axis=0)
+    med_var = np.median(var_unb)
+    lambda_var = np.min((1, np.sum(var_s) / (np.sum((var_unb - med_var) ** 2))))
+
+    del (var_unb, var_s, w, w_bar)
+
+    X_st = np.nan_to_num(X / np.std(X, axis=0), nan=0)
+    X_c_st = X_st - X_st.mean(axis=0, keepdims=True)
+
+    w_st = X_c_st.T.dot(X_c_st)
+    w_st_sq = (X_c_st**2).T.dot((X_c_st**2))
+    w_bar_st = w_st/n
+    var_s_st = (n / (n - 1) ** 3) * (w_st_sq - 2 * w_bar_st * w_st + n * w_bar_st**2)
+
+    del (X_st, X_c_st)
+
+    corr_unb_st = (n / (n - 1)) * w_bar_st
+
+    del (w_st, w_bar_st)
+
+    lambda_corr = np.min((1, (np.sum(var_s_st) - np.sum(np.diag(var_s_st))) / (
+                np.sum(corr_unb_st ** 2) - np.sum(np.diag(corr_unb_st) ** 2))))
+    del (corr_unb_st, var_s_st)
+
+    corr_X = np.nan_to_num(np.corrcoef(X.T), nan=0)
+    var_X = np.var(X, axis=0, ddof=1)
+
+    var_shrink = lambda_var * med_var + (1 - lambda_var) * var_X
+    cov_shrink = ((1 - lambda_corr) * corr_X)
+    if not use_corr:
+        cov_shrink *= np.sqrt(np.outer(var_shrink, var_shrink))
+
+        np.fill_diagonal(cov_shrink, var_shrink)
+    else:
+        np.fill_diagonal(cov_shrink, 1)
+
+    return cov_shrink
+
+
+def nearestPD(A):
+    """Find the nearest positive-definite matrix to input
+
+    A Python/Numpy port of John D'Errico's `nearestSPD` MATLAB code [1], which
+    credits [2].
+
+    [1] https://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
+
+    [2] N.J. Higham, "Computing a nearest symmetric positive semidefinite
+    matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    """
+
+    B = (A + A.T) / 2
+    _, s, V = np.linalg.svd(B)
+
+    H = np.dot(V.T, np.dot(np.diag(s), V))
+
+    A2 = (B + H) / 2
+
+    A3 = (A2 + A2.T) / 2
+
+    if isPD(A3):
+        return A3
+
+    spacing = np.spacing(np.linalg.norm(A))
+    # The above is different from [1]. It appears that MATLAB's `chol` Cholesky
+    # decomposition will accept matrixes with exactly 0-eigenvalue, whereas
+    # Numpy's will not. So where [1] uses `eps(mineig)` (where `eps` is Matlab
+    # for `np.spacing`), we use the above definition. CAVEAT: our `spacing`
+    # will be much larger than [1]'s `eps(mineig)`, since `mineig` is usually on
+    # the order of 1e-16, and `eps(1e-16)` is on the order of 1e-34, whereas
+    # `spacing` will, for Gaussian random matrixes of small dimension, be on
+    # othe order of 1e-16. In practice, both ways converge, as the unit test
+    # below suggests.
+    I = np.eye(A.shape[0])
+    k = 1
+    while not isPD(A3):
+        mineig = np.min(np.real(np.linalg.eigvals(A3)))
+        A3 += I * (-mineig * k**2 + spacing)
+        k += 1
+
+    return A3
+
+
+def isPD(B):
+    """Returns true when input is positive-definite, via Cholesky"""
+    try:
+        _ = np.linalg.cholesky(B)
+        return True
+    except np.linalg.LinAlgError:
+        return False
