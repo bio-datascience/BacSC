@@ -1,8 +1,8 @@
 import numpy as np
-from scipy.special import gammaln, factorial
+from scipy.special import gammaln, factorial, expit
 from scipy.optimize import fmin_l_bfgs_b as optim
 from statsmodels.discrete.count_model import NegativeBinomialP, ZeroInflatedNegativeBinomialP, Poisson, ZeroInflatedPoisson
-from scipy.stats import logistic, chi2
+from scipy.stats import chi2
 
 import tools.util as ut
 import tools.scTransform as sct
@@ -63,7 +63,7 @@ def negbin_numpy_to_mean(r, p):
     return mu, b
 
 
-def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
+def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", use_init_params=True):
 
     if flavor == "BFGS":
         count_data = ut.convert_to_dense_counts(adata, layer)
@@ -153,57 +153,80 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform"):
         means = []
         zinf_params = []
 
+        if use_init_params:
+            init_zinfs = [len(count_data[:, i][count_data[:, i] == 0]) / n for i in range(p)]
+            init_means = [np.log(np.mean(count_data[:, i][count_data[:, i] != 0]))
+                          # if init_zinfs[i] > 0.65 else np.log(np.mean(count_data[:, i]))
+                          for i in range(p)]
+            init_ods = [(np.var(count_data[:, i][count_data[:, i] > 0]) - np.mean(count_data[:, i][count_data[:, i] > 0])) / (np.mean(count_data[:, i][count_data[:, i] > 0]))**2
+                        # if init_zinfs[i] > 0.65 else np.var(count_data[:, i]) - np.mean(count_data[:, i])
+                        for i in range(p)]
+        else:
+            init_means = np.zeros(p)
+            init_ods = np.zeros(p)
+            init_zinfs = np.zeros(p)
+
         for i in range(p):
 
             if i % 100 == 0:
                 print(f"gene {i}")
 
             dat = count_data[:, i].T
-            dist = adata.var["gene_dist"][i]
+            dist = adata.var["gene_dist"].iloc[i]
 
             if dist == "poi":
                 overdisps.append(np.inf)
 
                 model_zipoi = ZeroInflatedPoisson(dat, np.ones(n))
-                res_zipoi = model_zipoi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+                res_zipoi = model_zipoi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0, start_params=[init_ods[i], init_means[i]])
 
                 model_poi = Poisson(dat, np.ones(n))
-                res_poi = model_poi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+                res_poi = model_poi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0, start_params=[init_means[i]])
 
                 zipoi_loglik = res_zipoi.llf
                 poi_loglik = res_poi.llf
 
                 stat = 2 * (zipoi_loglik - poi_loglik)
-                pvalue = 1 - chi2.ppf(stat, 1)
+                pvalue = 1 - chi2.cdf(stat, 1)
 
                 if pvalue < 0.05:
                     means.append(np.exp(res_zipoi.params[1]))
-                    zinf_params.append(logistic.pdf(res_zipoi.params[0]))
+                    zinf_params.append(expit(res_zipoi.params[0]))
                 else:
                     means.append(np.exp(res_poi.params[0]))
                     zinf_params.append(0.)
 
             elif dist == "nb":
                 model_zinb = ZeroInflatedNegativeBinomialP(dat, np.ones(n))
-                res_zinb = model_zinb.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+                res_zinb = model_zinb.fit(method='bfgs', maxiter=5000, disp=0, start_params=[init_zinfs[i], init_means[i], init_ods[i]])
 
                 model_nb = NegativeBinomialP(dat, np.ones(n))
-                res_nb = model_nb.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0)
+                res_nb = model_nb.fit(method='bfgs', maxiter=5000, disp=0, start_params=[init_means[i], init_ods[i]])
 
                 zinb_loglik = res_zinb.llf
                 nb_loglik = res_nb.llf
 
                 stat = 2 * (zinb_loglik - nb_loglik)
-                pvalue = 1 - chi2.ppf(stat, 1)
+                pvalue = 1 - chi2.cdf(stat, 1)
 
-                if pvalue < 0.05 or np.isnan(nb_loglik):
-                    means.append(np.exp(res_zinb.params[1]))
-                    zinf_params.append(logistic.pdf(res_zinb.params[0]))
-                    overdisps.append(1 / res_zinb.params[2])
-                else:
+                if np.isnan(zinb_loglik):
+                    if np.isnan(nb_loglik):
+                        print("Both NB and ZINB log-likelihood nan! Using NB without starting params")
+                        model_nb = NegativeBinomialP(dat, np.ones(n))
+                        res_nb = model_nb.fit(method='bfgs', maxiter=5000, disp=0)
+
                     means.append(np.exp(res_nb.params[0]))
                     zinf_params.append(0.)
                     overdisps.append(1 / res_nb.params[1])
+                else:
+                    if pvalue < 0.05 or np.isnan(nb_loglik):
+                        means.append(np.exp(res_zinb.params[1]))
+                        zinf_params.append(expit(res_zinb.params[0]))
+                        overdisps.append(1 / res_zinb.params[2])
+                    else:
+                        means.append(np.exp(res_nb.params[0]))
+                        zinf_params.append(0.)
+                        overdisps.append(1 / res_nb.params[1])
 
         adata.var["est_mean"] = means
         adata.var["est_overdisp"] = overdisps
