@@ -5,6 +5,7 @@ import os
 import tools.NB_est as nb
 import tools.util as ut
 from scipy.stats import nbinom, norm, poisson, spearmanr
+from scipy.optimize import golden
 
 os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
@@ -255,7 +256,7 @@ def generate_nb_data_copula(
             # R_est = R_est * Is.reshape(-1, 1) * Is.reshape(1, -1)
 
     # Generate new data and do reverse copula transform
-    Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0], method="eigh", check_valid="raise")
+    Z = rng.multivariate_normal(mean=np.zeros(new_data_shape[1]), cov=R_est, size=new_data_shape[0], method="eigh", check_valid="warn")
     Z_cdf = norm.cdf(Z)
     if auto_dist:
         Y_gen = np.array([dist_ppf_selector(Z_cdf[:, j], means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in
@@ -319,4 +320,36 @@ def schaefer_strimmer(X, use_corr=False):
         np.fill_diagonal(cov_shrink, 1)
 
     return cov_shrink
+
+
+def select_covariance_scaling(adata, cor_cutoff=0.1, min_scale=1, max_scale=2, maxiter=20, rng_seed=1234):
+
+    data_gen_noscale, R_est_noscale = generate_nb_data_copula(adata, rng_seed=rng_seed, nb_flavor="statsmod_auto",
+                                                  auto_dist=True, correct_var=True, return_R=True, corr_factor=1,
+                                                  R_est=None, check_pd=True)
+
+    cor_orig = schaefer_strimmer(adata.layers["counts"].toarray(), use_corr=True)
+
+    def opt_fun(factor):
+        factor_cor = (np.abs(cor_orig) > cor_cutoff)
+        cf = factor_cor * factor
+        cf[cf == 0] = 1
+        np.fill_diagonal(cf, 1)
+
+        data_null_gen2, R_est_new = generate_nb_data_copula(adata, rng_seed=rng_seed, nb_flavor="statsmod_auto",
+                                                               auto_dist=True, correct_var=True, return_R=True,
+                                                               corr_factor=cf, R_est=R_est_noscale, check_pd=False)
+        cor_gen = schaefer_strimmer(data_null_gen2.X, use_corr=True)
+
+        large_cor = (np.abs(cor_orig) > cor_cutoff) | (np.abs(cor_gen) > cor_cutoff)
+        frob = np.linalg.norm(cor_orig[large_cor] - cor_gen[large_cor])
+        if np.isnan(frob):
+            frob = np.inf
+
+        print(f"Factor: {factor} - Error: {frob}")
+        return frob
+
+    xmin, fval, funcalls = golden(opt_fun, brack=(min_scale, max_scale), full_output=True, maxiter=maxiter)
+
+    return xmin, fval, R_est_noscale
 
