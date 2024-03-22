@@ -209,9 +209,9 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                 stat = 2 * (zinb_loglik - nb_loglik)
                 pvalue = 1 - chi2.cdf(stat, 1)
 
-                if np.isnan(zinb_loglik):
-                    if np.isnan(nb_loglik):
-                        print("Both NB and ZINB log-likelihood nan! Using NB without starting params")
+                if not res_zinb.converged:
+                    if not res_nb.converged:
+                        print("Both NB and ZINB not converged! Using NB without starting params")
                         model_nb = NegativeBinomialP(dat, np.ones(n))
                         res_nb = model_nb.fit(method='bfgs', maxiter=5000, disp=0)
 
