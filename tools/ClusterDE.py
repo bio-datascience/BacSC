@@ -11,14 +11,16 @@ os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
 os.environ["PATH"] = r_path + ";" + os.environ["PATH"]
 
-import rpy2.robjects as rp
-from rpy2.robjects import numpy2ri, pandas2ri
-numpy2ri.activate()
-pandas2ri.activate()
-import rpy2.robjects.packages as rpackages
-PairedData = rpackages.importr("PairedData")
-MASS = rpackages.importr("MASS")
-from rpy2.robjects import Formula
+# +
+# import rpy2.robjects as rp
+# from rpy2.robjects import numpy2ri, pandas2ri
+# numpy2ri.activate()
+# pandas2ri.activate()
+# import rpy2.robjects.packages as rpackages
+# PairedData = rpackages.importr("PairedData")
+# MASS = rpackages.importr("MASS")
+# from rpy2.robjects import Formula
+# -
 
 import warnings
 
