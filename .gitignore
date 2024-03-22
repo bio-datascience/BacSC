@@ -117,3 +117,4 @@ data/
 *.pkl
 *.h5ad
 *.h5seurat
+*.csv
