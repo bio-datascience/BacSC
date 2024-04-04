@@ -12,14 +12,14 @@ r_path = "/Library/Frameworks/R.framework/Resources/bin"
 os.environ["PATH"] = r_path + ";" + os.environ["PATH"]
 
 # +
-# import rpy2.robjects as rp
-# from rpy2.robjects import numpy2ri, pandas2ri
-# numpy2ri.activate()
-# pandas2ri.activate()
-# import rpy2.robjects.packages as rpackages
-# PairedData = rpackages.importr("PairedData")
-# MASS = rpackages.importr("MASS")
-# from rpy2.robjects import Formula
+import rpy2.robjects as rp
+from rpy2.robjects import numpy2ri, pandas2ri
+numpy2ri.activate()
+pandas2ri.activate()
+import rpy2.robjects.packages as rpackages
+PairedData = rpackages.importr("PairedData")
+MASS = rpackages.importr("MASS")
+from rpy2.robjects import Formula
 # -
 
 import warnings
@@ -89,14 +89,14 @@ def call_de(target_scores, null_scores, nlog=True, FDR=0.05, correct=False, thre
 
     if correct:
         if PairedData.yuen_t_test(x=p_table["pval_trafo_data"], y=p_table["pval_trafo_null"], alternative="greater",
-                                  paired=True, tr=0.1)["p.value"] < 0.001:
+                                  paired=True, tr=0.1).rx2("p.value") < 0.001:
             print("correcting...")
             fmla = Formula('y ~ x')
             env = fmla.environment
             env['y'] = p_table["pval_trafo_data"]
             env['x'] = p_table["pval_trafo_null"]
             fit = MASS.rlm(fmla, maxit=100)
-            p_table["cs"] = fit["residuals"]
+            p_table["cs"] = fit.rx2("residuals")
 
     p_table["q"] = cs2q(p_table["cs"], threshold=threshold)
     if ordering:
@@ -152,7 +152,7 @@ def dist_cdf_selector(X, intercept, overdisp, zinf_param):
     return cdf
 
 
-def dist_ppf_selector(X, intercept, overdisp, zinf_param):
+def dist_ppf_selector(X, intercept, overdisp, zinf_param, impute_zero_genes=False):
     if zinf_param != 0:
         X_ = (X - zinf_param) / (1 - zinf_param)
     else:
@@ -166,6 +166,14 @@ def dist_ppf_selector(X, intercept, overdisp, zinf_param):
 
     if zinf_param != 0:
         ppf[X < zinf_param] = 0
+
+    if impute_zero_genes:
+        if all(ppf == 0):
+            print("Only zero counts!")
+            ppf[X == np.max(X)] = 1
+        if len(ppf[ppf != 0]) < 2:
+            print("One nonzero count!")
+            ppf[X == sorted(X)[-2]] = 1
 
     return ppf
 
@@ -181,7 +189,8 @@ def generate_nb_data_copula(
         correct_var=False,
         R_metric="corr",
         corr_factor=1,
-        check_pd=True
+        check_pd=True,
+        min_nonzero=2
 ):
 
     """
@@ -223,7 +232,6 @@ def generate_nb_data_copula(
         if auto_dist:
             F = np.array([dist_cdf_selector(X[:, j], means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in range(p)]).T
             F1 = np.array([dist_cdf_selector(X[:, j] + 1, means.iloc[j], overdisps.iloc[j], zinfs.iloc[j]) for j in range(p)]).T
-
         else:
             F = np.array([nbinom.cdf(X[:, j], r.iloc[j], q.iloc[j]) for j in range(p)]).T
             F1 = np.array([nbinom.cdf(X[:, j] + 1, r.iloc[j], q.iloc[j]) for j in range(p)]).T
@@ -266,11 +274,14 @@ def generate_nb_data_copula(
     else:
         Y_gen = np.array([nbinom.ppf(Z_cdf[:, j], r.iloc[j], q.iloc[j]) for j in range(new_data_shape[1])]).T
 
+    nonzero_ests = [i for i in range(p) if np.sum(Y_gen[:, i] != 0) >= min_nonzero]
+    Y_gen = Y_gen[:, nonzero_ests]
+
     # Make return anndata object
     return_data = ad.AnnData(X=Y_gen)
     if new_data_shape == X.shape:
         return_data.obs = pd.DataFrame(index=adata.obs.index)
-        return_data.var = pd.DataFrame(index=adata.var.index)
+        return_data.var = pd.DataFrame(index=adata.var.index[nonzero_ests])
 
     if return_R:
         return return_data, R_est

@@ -100,12 +100,17 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                                     bin_size=500,
                                     bw_adjust=3,
                                     inplace=False)
+        print(adata_sct.var.columns)
         adata.var["is_scd_outlier"] = adata_sct.var["is_scd_outlier"]
         adata.var["nb_overdisp"] = adata_sct.var["theta_sct"]
         adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
         adata.var["nb_overdisp_cutoff"][adata.var["nb_overdisp_cutoff"] < cutoff] = cutoff
         adata.var["nb_overdisp_cutoff"][np.isnan(adata.var["nb_overdisp_cutoff"])] = cutoff
         adata.var["nb_mean"] = adata_sct.var["Intercept_sct"]
+        adata.var["nb_umi"] = adata_sct.var["log_umi_sct"]
+        adata.var["Intercept_step1_sct"] = adata_sct.var["Intercept_step1_sct"]
+        adata.var["log_umi_step1_sct"] = adata_sct.var["log_umi_step1_sct"]
+        adata.var["dispersion_step1_sct"] = adata_sct.var["dispersion_step1_sct"]
 
     elif flavor == "moments":
         count_data = ut.convert_to_dense_counts(adata, layer)
@@ -180,11 +185,12 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                 model_zipoi = ZeroInflatedPoisson(dat, np.ones(n))
                 res_zipoi = model_zipoi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0, start_params=[init_ods[i], init_means[i]])
 
-                model_poi = Poisson(dat, np.ones(n))
-                res_poi = model_poi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0, start_params=[init_means[i]])
+                # model_poi = Poisson(dat, np.ones(n))
+                # res_poi = model_poi.fit(method='bfgs', maxiter=5000, maxfun=5000, disp=0, start_params=[init_means[i]])
 
                 zipoi_loglik = res_zipoi.llf
-                poi_loglik = res_poi.llf
+                # poi_loglik = res_poi.llf
+                poi_loglik = -np.inf
 
                 stat = 2 * (zipoi_loglik - poi_loglik)
                 pvalue = 1 - chi2.cdf(stat, 1)
@@ -193,7 +199,8 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                     means.append(np.exp(res_zipoi.params[1]))
                     zinf_params.append(expit(res_zipoi.params[0]))
                 else:
-                    means.append(np.exp(res_poi.params[0]))
+                    # means.append(np.exp(res_poi.params[0]))
+                    means.append(np.exp(res_zipoi.params[1]))
                     zinf_params.append(0.)
 
             elif dist == "nb":
