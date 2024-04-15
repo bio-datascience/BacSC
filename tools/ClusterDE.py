@@ -11,7 +11,7 @@ os.environ['R_HOME'] = '/Library/Frameworks/R.framework/Resources'
 r_path = "/Library/Frameworks/R.framework/Resources/bin"
 os.environ["PATH"] = r_path + ";" + os.environ["PATH"]
 
-# +
+"""
 import rpy2.robjects as rp
 from rpy2.robjects import numpy2ri, pandas2ri
 numpy2ri.activate()
@@ -20,7 +20,7 @@ import rpy2.robjects.packages as rpackages
 PairedData = rpackages.importr("PairedData")
 MASS = rpackages.importr("MASS")
 from rpy2.robjects import Formula
-# -
+"""
 
 import warnings
 
@@ -341,10 +341,11 @@ def select_covariance_scaling(adata, cor_cutoff=0.1, min_scale=1, max_scale=2, m
                                                   auto_dist=True, correct_var=True, return_R=True, corr_factor=1,
                                                   R_est=None, check_pd=True)
 
-    cor_orig = schaefer_strimmer(adata.layers["counts"].toarray(), use_corr=True)
+    cor_orig_old = schaefer_strimmer(adata.layers["counts"].toarray(), use_corr=True)
 
     def opt_fun(factor):
-        factor_cor = (np.abs(cor_orig) > cor_cutoff)
+        
+        factor_cor = (np.abs(cor_orig_old) > cor_cutoff)
         cf = factor_cor * factor
         cf[cf == 0] = 1
         np.fill_diagonal(cf, 1)
@@ -352,6 +353,9 @@ def select_covariance_scaling(adata, cor_cutoff=0.1, min_scale=1, max_scale=2, m
         data_null_gen2, R_est_new = generate_nb_data_copula(adata, rng_seed=rng_seed, nb_flavor="statsmod_auto",
                                                                auto_dist=True, correct_var=True, return_R=True,
                                                                corr_factor=cf, R_est=R_est_noscale, check_pd=False)
+        
+        data_gene_nonzero = adata[:, data_null_gen2.var_names].copy()
+        cor_orig = schaefer_strimmer(data_gene_nonzero.layers["counts"].toarray(), use_corr=True)
         cor_gen = schaefer_strimmer(data_null_gen2.X, use_corr=True)
 
         large_cor = (np.abs(cor_orig) > cor_cutoff) | (np.abs(cor_gen) > cor_cutoff)
