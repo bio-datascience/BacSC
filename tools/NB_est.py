@@ -100,7 +100,6 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                                     bin_size=500,
                                     bw_adjust=3,
                                     inplace=False)
-        print(adata_sct.var.columns)
         adata.var["is_scd_outlier"] = adata_sct.var["is_scd_outlier"]
         adata.var["nb_overdisp"] = adata_sct.var["theta_sct"]
         adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]
