@@ -95,7 +95,7 @@ def theta_ml(y, mu):
     return t0
 
 
-def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=100, bw_adjust=3, inplace=True):
+def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cells=None, bin_size=100, bw_adjust=3, inplace=True, seed=1234):
     """
     This is a port of SCTransform from the Satija lab. See the R package for original documentation.
 
@@ -104,6 +104,8 @@ def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cel
     The only significant modification is that negative Pearson residuals are zero'd out to preserve
     the sparsity structure of the data.
     """
+    rng = np.random.default_rng(seed)
+    
     if layer is None:
         X = adata.X.copy()
     else:
@@ -125,7 +127,7 @@ def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cel
     genes_log_gmean = np.log10(gmean(X, axis=0, eps=gmean_eps))
 
     if n_cells is not None and n_cells < X.shape[0]:
-        cells_step1 = np.sort(np.random.choice(X.shape[0], replace=False, size=n_cells))
+        cells_step1 = np.sort(rng.choice(X.shape[0], replace=False, size=n_cells))
         genes_cell_count_step1 = X[cells_step1].sum(0).A.flatten()
         genes_step1 = np.where(genes_cell_count_step1 >= min_cells)[0]
         genes_log_gmean_step1 = np.log10(gmean(X[cells_step1][:, genes_step1], axis=0, eps=gmean_eps))
@@ -156,7 +158,7 @@ def SCTransform(adata, layer=None, min_cells=5, gmean_eps=1, n_genes=2000, n_cel
         xolo = genes_log_gmean_step1
         sampling_prob = 1 / (np.interp(xolo, xlo, ylo) + _EPS)
         genes_step1 = np.sort(
-            np.random.choice(genes_step1, size=n_genes, p=sampling_prob / sampling_prob.sum(), replace=False))
+            rng.choice(genes_step1, size=n_genes, p=sampling_prob / sampling_prob.sum(), replace=False))
         genes_log_gmean_step1 = np.log10(gmean(X[cells_step1, :][:, genes_step1], eps=gmean_eps))
 
     bin_ind = np.ceil(np.arange(1, genes_step1.size + 1) / bin_size)

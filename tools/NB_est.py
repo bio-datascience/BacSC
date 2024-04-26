@@ -63,7 +63,7 @@ def negbin_numpy_to_mean(r, p):
     return mu, b
 
 
-def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", use_init_params=True):
+def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", use_init_params=True, seed=1234):
 
     if flavor == "BFGS":
         count_data = ut.convert_to_dense_counts(adata, layer)
@@ -99,7 +99,8 @@ def estimate_overdisp_nb(adata, layer=None, cutoff=0.01, flavor="sctransform", u
                                     n_cells=None,  # use all cells
                                     bin_size=500,
                                     bw_adjust=3,
-                                    inplace=False)
+                                    inplace=False,
+                                   seed=seed)
         adata.var["is_scd_outlier"] = adata_sct.var["is_scd_outlier"]
         adata.var["nb_overdisp"] = adata_sct.var["theta_sct"]
         adata.var["nb_overdisp_cutoff"] = adata.var["nb_overdisp"]

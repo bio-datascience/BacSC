@@ -1,0 +1,12 @@
+scanpy
+KDEpy
+leidenalg
+venn
+scipy
+statsmodels
+pandas
+numpy
+anndata
+pickle
+seaborn
+matplotlib
