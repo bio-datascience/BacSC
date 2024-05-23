@@ -279,8 +279,9 @@ def generate_nb_data_copula(
 
     # Make return anndata object
     return_data = ad.AnnData(X=Y_gen)
-    if new_data_shape == X.shape:
+    if new_data_shape[0] == X.shape[0]:
         return_data.obs = pd.DataFrame(index=adata.obs.index)
+    if new_data_shape[1] == X.shape[1]:
         return_data.var = pd.DataFrame(index=adata.var.index[nonzero_ests])
 
     if return_R:

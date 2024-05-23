@@ -118,3 +118,5 @@ data/
 *.h5ad
 *.h5seurat
 *.csv
+*.png
+*.svg

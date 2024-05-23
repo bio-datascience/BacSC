@@ -75,13 +75,14 @@ def cluster_train_test(data_train, data_test, resolutions, alg="leiden", random_
             data_test.obs[f"leiden_res{resolution}"] = data_train.obs[f"leiden_res{resolution}"]
 
 
-def find_optimal_clustering_resolution(data_train, data_test, resolutions, res_key="leiden_res", measure=modularity):
+def find_optimal_clustering_resolution(data_train, data_test, resolutions, res_key="leiden_res", measure=modularity, random_seed=None):
 
+    rng = np.random.default_rng(random_seed)
     mod_scores = []
     for res in resolutions:
         res_key_full = f'{res_key}{res}'
         data_test.obs[f"random_res{res}"] = data_test.obs[res_key_full]
-        np.random.shuffle(data_test.obs[f"random_res{res}"])
+        rng.shuffle(data_test.obs[f"random_res{res}"])
 
         nclust = len(np.unique(data_train.obs[res_key_full]))
         train_score = measure(data_train, res_key_full, res)
