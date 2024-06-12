@@ -118,7 +118,6 @@ data/
 *.h5ad
 *.h5seurat
 *.csv
-*.png
 *.svg
 analysis/fixes/
 analysis/test/
