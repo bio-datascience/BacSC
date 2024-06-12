@@ -120,3 +120,5 @@ data/
 *.csv
 *.png
 *.svg
+analysis/fixes/
+analysis/test/
