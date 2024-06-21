@@ -7,7 +7,7 @@ It also contains all code needed to reproduce the analyses in the publication (T
 
 For usage info, please refer to the tutorials in the respective directory.
 
-Raw and intermediate data objects can be downloaded on zenodo (TODO). 
+Raw and intermediate data objects can be downloaded on [zenodo](https://zenodo.org/records/12189002). 
 Simply download the `data` directory from there and move it into the BacSC directory.
 
 ## Installation
