@@ -74,8 +74,8 @@ def select_n_pcs_countsplit(train_data, test_data, max_k=20):
         ret = u_ @ np.diag(s_) @ v_
         return ret
 
-    X_train = ut.convert_to_dense_counts(train_data)
-    X_test = ut.convert_to_dense_counts(test_data)
+    X_train = ut.convert_to_dense_counts(train_data, convert_to_integer=False)
+    X_test = ut.convert_to_dense_counts(test_data, convert_to_integer=False)
 
     u_train, s_train, v_train = np.linalg.svd(X_train, full_matrices=False)
     k_devs = [np.linalg.norm((X_test - approx_k(u_train, s_train, v_train, k+1)), ord='fro') ** 2 for k in

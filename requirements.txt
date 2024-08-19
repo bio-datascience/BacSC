@@ -7,6 +7,5 @@ statsmodels
 pandas
 numpy
 anndata
-pickle
 seaborn
 matplotlib
