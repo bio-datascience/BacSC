@@ -1,0 +1,75 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[project]
+name = "BacSC"
+version = "0.1.0"
+authors = [
+  { name="Johannes Ostner", email="johannes.ostner@online.de" },
+]
+description = "A general workflow for bacterial single-cell RNA sequencing data analysis"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Development Status :: 4 - Beta",
+]
+
+dependencies = [
+    "scanpy",
+    "KDEpy",
+    "leidenalg",
+    "venn",
+    "scipy",
+    "statsmodels",
+    "pandas",
+    "numpy",
+    "anndata",
+    "seaborn",
+    "matplotlib",
+]
+
+doc = [
+    "docutils>=0.8,!=0.18.*,!=0.19.*",
+    "sphinx>=4",
+    "furo",
+    "myst-nb",
+    "myst-parser",
+    "sphinxcontrib-bibtex>=1.0.0",
+    "sphinx-gallery",
+    "sphinx-autodoc-typehints",
+    "sphinx-copybutton",
+    "sphinx-remove-toctrees",
+    "sphinx-design",
+    "sphinx-last-updated-by-git",
+    "sphinx-automodapi",
+    "sphinxext-opengraph",
+    "pygments",
+    "pyenchant",
+    "nbsphinx",
+    "nbsphinx-link",
+    "ipykernel",
+    "ipython",
+]
+
+[project.urls]
+Homepage = "https://github.com/bio-datascience/BacSC"
+Issues = "https://github.com/bio-datascience/BacSC/issues"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["BacSC"]
+exclude = ["analysis", "data", "misc"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["BacSC", "tutorials", "tutorial_data"]
