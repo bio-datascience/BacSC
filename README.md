@@ -1,6 +1,6 @@
 # BacSC: A general workflow for bacterial single-cell RNA sequencing data analysis
 
-![BacSC](misc/concept_fig_full.png)
+![BacSC](misc/BacSC-logo-modern.png)
 
 This repository contains the BacSC pipeline for bacterial single-cell sequencing data analysis (Ostner et al., 2024). 
 It also contains all code needed to reproduce the analyses in the publication (TODO).
@@ -9,6 +9,8 @@ For usage info, please refer to the tutorials in the respective directory.
 
 Raw and intermediate data objects can be downloaded on [zenodo](https://zenodo.org/records/12189002). 
 Simply download the `data` directory from there and move it into the BacSC directory.
+
+![BacSC](misc/concept_fig_full.png)
 
 ## Installation
 
