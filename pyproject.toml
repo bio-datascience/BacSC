@@ -4,7 +4,7 @@ requires = ["hatchling"]
 
 [project]
 name = "BacSC"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
   { name="Johannes Ostner", email="johannes.ostner@online.de" },
 ]
