@@ -2,8 +2,8 @@ import pandas as pd
 import anndata as ad
 import numpy as np
 import os
-import tools.NB_est as nb
-import tools.util as ut
+from . import NB_est as nb
+from . import util as ut
 from scipy.stats import nbinom, norm, poisson, spearmanr
 from scipy.optimize import golden
 

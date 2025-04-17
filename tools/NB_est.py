@@ -4,8 +4,8 @@ from scipy.optimize import fmin_l_bfgs_b as optim
 from statsmodels.discrete.count_model import NegativeBinomialP, ZeroInflatedNegativeBinomialP, Poisson, ZeroInflatedPoisson
 from scipy.stats import chi2
 
-import tools.util as ut
-import tools.scTransform as sct
+from . import util as ut
+from . import scTransform as sct
 
 
 # MB MLE estimation, from https://github.com/gokceneraslan/fit_nbinom/blob/master/fit_nbinom.py

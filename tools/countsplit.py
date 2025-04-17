@@ -3,7 +3,7 @@ import anndata as ad
 import scanpy as sc
 import scipy.sparse as sps
 
-import tools.util as ut
+from . import util as ut
 
 
 def countsplit_adata(adata, data_dist="NB", beta_key="nb_overdisp", mean_key="nb_mean", epsilon=0.5, min_cells=2, min_genes=2, max_counts=100000, min_counts=1,
