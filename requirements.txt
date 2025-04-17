@@ -9,3 +9,4 @@ numpy
 anndata
 seaborn
 matplotlib
+setuptools
